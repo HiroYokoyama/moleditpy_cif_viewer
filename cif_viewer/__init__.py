@@ -203,9 +203,15 @@ def initialize(context):
             
             if has_cov:
                 try:
-                    eigenvalues, eigenvectors = np.linalg.eig(cov)
+                    eigenvalues, eigenvectors = np.linalg.eigh(cov)
                     eigenvalues = np.maximum(eigenvalues, 1e-5)
                     radii = np.sqrt(eigenvalues) * scale_factor
+                    
+                    # Ensure a right-handed coordinate system (pure rotation, no reflection)
+                    # to prevent face/winding order inversion and subsequent inward-pointing normals.
+                    if np.linalg.det(eigenvectors) < 0:
+                        eigenvectors = eigenvectors.copy()
+                        eigenvectors[:, 0] = -eigenvectors[:, 0]
                     
                     ellipsoid = pv.Sphere(
                         radius=1.0,
@@ -219,7 +225,7 @@ def initialize(context):
                     ellipsoid.transform(rotation_matrix, inplace=True)
                     ellipsoid.translate(pos, inplace=True)
                     
-                    ellipsoid.compute_normals(inplace=True)
+                    ellipsoid.compute_normals(auto_orient_normals=True, inplace=True)
                     
                     name = f"cif_viewer_ellipsoid_{index}"
                     plotter.add_mesh(
