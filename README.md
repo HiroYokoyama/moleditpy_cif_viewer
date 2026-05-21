@@ -1,9 +1,10 @@
 # MoleditPy CIF Viewer
 
-A visualization-only, high-performance crystal structure viewer plugin for [MoleditPy](https://github.com/HiroYokoyama/python_molecular_editor). 
+A crystal structure viewer plugin for [MoleditPy](https://github.com/HiroYokoyama/python_molecular_editor). 
 
 This plugin allows researchers and developers to load CIF files, generate supercells, customize rendering styles, view along crystallographic axes, and display anisotropic displacement parameters (Thermal Ellipsoids) with extensive styling options—all while leaving the host application's active session and undo history completely unmodified.
 
+![](img/ptfe.png)
 ---
 
 ## Table of Contents
