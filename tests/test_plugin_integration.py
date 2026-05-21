@@ -626,6 +626,16 @@ def test_cif_viewer_widget_reset_supercell(qtbot):
     widget.reset_supercell()
     assert widget.repeat_a.value() == 1
     assert widget.repeat_b.value() == 1
+    
+    widget.set_supercell_preset(2)
+    assert widget.repeat_a.value() == 2
+    assert widget.repeat_b.value() == 2
+    assert widget.repeat_c.value() == 2
+
+    widget.set_supercell_preset(3)
+    assert widget.repeat_a.value() == 3
+    assert widget.repeat_b.value() == 3
+    assert widget.repeat_c.value() == 3
 
 
 def test_cif_viewer_widget_switch_to_ellipsoids(qtbot):

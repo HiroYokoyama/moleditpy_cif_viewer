@@ -190,6 +190,15 @@ class CifViewerWidget(QWidget):
         reset_supercell_button.clicked.connect(self.reset_supercell)
         supercell_layout.addRow(reset_supercell_button)
 
+        preset_row = QHBoxLayout()
+        btn_222 = QPushButton("2x2x2")
+        btn_222.clicked.connect(lambda: self.set_supercell_preset(2))
+        btn_333 = QPushButton("3x3x3")
+        btn_333.clicked.connect(lambda: self.set_supercell_preset(3))
+        preset_row.addWidget(btn_222)
+        preset_row.addWidget(btn_333)
+        supercell_layout.addRow("Presets:", preset_row)
+
         self.tabs.addTab(supercell_tab, "Supercell")
 
         # --- Tab 3: Thermal Ellipsoids ---
@@ -316,12 +325,15 @@ class CifViewerWidget(QWidget):
         spin.valueChanged.connect(self.render)
         return spin
 
-    def reset_supercell(self):
+    def set_supercell_preset(self, count: int):
         for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
             spin.blockSignals(True)
-            spin.setValue(1)
+            spin.setValue(count)
             spin.blockSignals(False)
         self.render()
+
+    def reset_supercell(self):
+        self.set_supercell_preset(1)
 
     def reset_to_defaults(self):
         self.show_bonds.blockSignals(True)
