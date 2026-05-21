@@ -544,3 +544,65 @@ _COVALENT_RADII = {
     "Ta": 1.70, "W": 1.62, "Re": 1.51, "Os": 1.44, "Ir": 1.41, "Pt": 1.36,
     "Au": 1.36, "Hg": 1.32, "Tl": 1.45, "Pb": 1.46, "Bi": 1.48,
 }
+
+
+def write_supercell_cif(
+    path: str,
+    structure: CifStructure,
+    repeats: Tuple[int, int, int],
+    keep_connected: bool = True,
+) -> None:
+    """Export the expanded supercell crystal structure as a P1 symmetry CIF file."""
+    repeat_a, repeat_b, repeat_c = repeats
+    base_atoms = (
+        unwrap_connected_atoms(structure) if keep_connected else list(structure.atoms)
+    )
+    
+    new_a = structure.cell_lengths[0] * repeat_a
+    new_b = structure.cell_lengths[1] * repeat_b
+    new_c = structure.cell_lengths[2] * repeat_c
+    alpha, beta, gamma = structure.cell_angles
+    
+    lines = [
+        "data_supercell",
+        "_audit_creation_method 'MoleditPy CIF Viewer Plugin Supercell Export'",
+        f"_cell_length_a {new_a:.6f}",
+        f"_cell_length_b {new_b:.6f}",
+        f"_cell_length_c {new_c:.6f}",
+        f"_cell_angle_alpha {alpha:.6f}",
+        f"_cell_angle_beta {beta:.6f}",
+        f"_cell_angle_gamma {gamma:.6f}",
+        "_symmetry_space_group_name_H-M 'P 1'",
+        "_symmetry_Int_Tables_number 1",
+        "",
+        "loop_",
+        "_symmetry_equiv_pos_as_xyz",
+        "'x, y, z'",
+        "",
+        "loop_",
+        "_atom_site_label",
+        "_atom_site_type_symbol",
+        "_atom_site_fract_x",
+        "_atom_site_fract_y",
+        "_atom_site_fract_z",
+        "_atom_site_occupancy",
+    ]
+    
+    for ia in range(repeat_a):
+        for ib in range(repeat_b):
+            for ic in range(repeat_c):
+                offset = np.array([ia, ib, ic], dtype=float)
+                for base_index, atom in enumerate(base_atoms):
+                    frac_super = (atom.fract + offset) / np.array(repeats, dtype=float)
+                    
+                    # Generate a unique clean label
+                    clean_label = re.sub(r"[^a-zA-Z0-9]", "", atom.label)
+                    label = f"{clean_label}_{ia}_{ib}_{ic}"
+                    occ = atom.occupancy if atom.occupancy is not None else 1.0
+                    lines.append(
+                        f"{label:<12} {atom.element:<3} {frac_super[0]:.6f} {frac_super[1]:.6f} {frac_super[2]:.6f} {occ:.4f}"
+                    )
+                    
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+

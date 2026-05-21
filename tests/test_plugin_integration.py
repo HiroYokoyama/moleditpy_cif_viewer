@@ -2,6 +2,7 @@ import sys
 import types
 
 from cif_viewer import initialize
+from tests.test_parser import NACL_CIF
 
 
 class StubContext:
@@ -13,10 +14,15 @@ class StubContext:
         self.windows = {}
         self.main_window = StubMainWindow()
         self.styles = {}
+        self._plotter = None
 
     @property
     def plotter(self):
-        return None
+        return self._plotter
+
+    @plotter.setter
+    def plotter(self, value):
+        self._plotter = value
 
     def get_main_window(self):
         return self.main_window
@@ -304,6 +310,7 @@ def test_draw_ellipsoid_model(monkeypatch):
     conformer.SetAtomPosition(1, (1.0, 0.0, 0.0))
     conformer.SetAtomPosition(2, (0.0, 1.0, 0.0))
     mol.AddConformer(conformer)
+    mol.SetProp("_from_cif_viewer", "1")
 
     # Call the style handler
     draw_callback(mw, mol)
@@ -312,8 +319,6 @@ def test_draw_ellipsoid_model(monkeypatch):
     assert mw.plotter.cleared
     # We should have meshes added
     assert len(mw.plotter.meshes) > 0
-    # We should have ellipsoid circle lines added
-    assert len(mw.plotter.lines) > 0
 
     # Verify apply_3d_settings was called on view_3d_manager to draw axis widget last
     assert mw.view_3d_manager.apply_3d_settings_called
@@ -323,9 +328,12 @@ def test_draw_ellipsoid_model(monkeypatch):
     ellipsoid_mesh = None
     h_mesh = None
     c_mesh = None
+    rings_mesh = None
     for mesh, kwargs in mw.plotter.meshes:
-        if kwargs.get("name") == "cif_viewer_ellipsoid_0":
+        if kwargs.get("name") == "cif_viewer_ellipsoids":
             ellipsoid_mesh = (mesh, kwargs)
+        elif kwargs.get("name") == "cif_viewer_ellipsoid_rings":
+            rings_mesh = (mesh, kwargs)
         elif kwargs.get("name") == "cif_viewer_h_atoms":
             h_mesh = (mesh, kwargs)
         elif kwargs.get("name") == "cif_viewer_fallback_atoms":
@@ -333,6 +341,9 @@ def test_draw_ellipsoid_model(monkeypatch):
 
     assert ellipsoid_mesh is not None
     assert ellipsoid_mesh[1]["opacity"] == 1.0
+
+    assert rings_mesh is not None
+    assert rings_mesh[1]["color"] == "black"
 
     assert h_mesh is not None
     assert h_mesh[1]["opacity"] == 1.0
@@ -392,9 +403,13 @@ def test_draw_molecule_3d_hook_and_overlays(monkeypatch):
             self.context = context
             self.structure = "dummy_structure"
             self.overlays_rendered = False
+            self.cleared = False
 
         def render_overlays_only(self):
             self.overlays_rendered = True
+            
+        def clear_view(self):
+            self.cleared = True
             
     fake_viewer = types.ModuleType("cif_viewer.viewer")
     fake_viewer.CifViewerWidget = MockViewerWidget
@@ -428,12 +443,385 @@ def test_draw_molecule_3d_hook_and_overlays(monkeypatch):
     dock._visible = True
     dock.isVisible = lambda: dock._visible
     
-    # Call the hooked draw_molecule_3d
-    vm.draw_molecule_3d("dummy_mol")
+    class MockMolecule:
+        def HasProp(self, name):
+            return name == "_from_cif_viewer"
+            
+    mol = MockMolecule()
+    
+    # Call the hooked draw_molecule_3d with a valid CIF molecule
+    vm.draw_molecule_3d(mol)
     
     # Verify that the original draw was called
-    assert vm.drawn_molecule == "dummy_mol"
+    assert vm.drawn_molecule == mol
     
     # Verify that render_overlays_only was triggered
     widget = dock.widget()
     assert widget.overlays_rendered is True
+    assert widget.cleared is False
+
+    # Call the hooked draw_molecule_3d with a non-CIF molecule (e.g. a string)
+    vm.draw_molecule_3d("not_cif_mol")
+    
+    # Verify that clear_view was called
+    assert widget.cleared is True
+
+
+def test_cif_viewer_widget_initialization(qtbot):
+    from cif_viewer.viewer import CifViewerWidget
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    assert widget.structure is None
+    assert widget.repeat_a.value() == 1
+    assert widget.show_bonds.isChecked() is True
+
+
+def test_cif_viewer_widget_load_cif(qtbot, tmp_path):
+    from cif_viewer.viewer import CifViewerWidget
+    
+    cif_file = tmp_path / "test.cif"
+    cif_file.write_text(NACL_CIF, encoding="utf-8")
+    
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    widget.load_cif(str(cif_file))
+    
+    assert widget.structure is not None
+    assert widget.structure.name == "NaCl"
+    assert widget.file_label.text() == "test.cif"
+    assert len(widget.all_structures) == 1
+
+
+def test_cif_viewer_widget_settings_and_ui_actions(qtbot, tmp_path, monkeypatch):
+    from cif_viewer.viewer import CifViewerWidget
+    
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    # Test setting path redirection using monkeypatch
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(widget, "_settings_path", lambda: str(settings_file))
+    
+    # Modify some UI elements
+    widget.show_bonds.setChecked(False)
+    widget.show_hydrogens.setChecked(False)
+    widget.keep_connected.setChecked(False)
+    widget.fix_h_size.setChecked(False)
+    widget.probability_spin.setValue(45.0)
+    widget.h_scale_spin.setValue(25.0)
+    
+    widget.save_settings()
+    assert settings_file.exists()
+    
+    # Reset widget state with signals blocked so we don't trigger toggled signals and overwrite settings
+    widget.show_bonds.blockSignals(True)
+    widget.show_bonds.setChecked(True)
+    widget.show_bonds.blockSignals(False)
+    
+    widget.load_settings()
+    assert widget.show_bonds.isChecked() is False
+    assert widget.show_hydrogens.isChecked() is False
+    assert widget.keep_connected.isChecked() is False
+    assert widget.fix_h_size.isChecked() is False
+    assert widget.probability_spin.value() == 45.0
+    assert widget.h_scale_spin.value() == 25.0
+
+
+def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
+    from cif_viewer.viewer import CifViewerWidget
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(widget, "_settings_path", lambda: str(settings_file))
+    
+    # Modify UI values away from defaults
+    widget.show_bonds.setChecked(False)
+    widget.show_hydrogens.setChecked(False)
+    widget.keep_connected.setChecked(False)
+    widget.show_cell.setChecked(False)
+    widget.show_axes.setChecked(False)
+    widget.show_ellipsoid_rings.setChecked(False)
+    widget.fix_h_size.setChecked(False)
+    widget.probability_spin.setValue(45.0)
+    widget.h_scale_spin.setValue(25.0)
+    widget.axis_width.setValue(8)
+    widget.axis_font_size.setValue(15)
+    widget._set_button_color(widget.color_axis_a, "#111111")
+    
+    # Trigger reset to defaults
+    widget.reset_to_defaults()
+    
+    # Verify values are restored to defaults
+    assert widget.show_bonds.isChecked() is True
+    assert widget.show_hydrogens.isChecked() is True
+    assert widget.keep_connected.isChecked() is True
+    assert widget.show_cell.isChecked() is True
+    assert widget.show_axes.isChecked() is True
+    assert widget.show_ellipsoid_rings.isChecked() is True
+    assert widget.fix_h_size.isChecked() is True
+    assert widget.probability_spin.value() == 50.0
+    assert widget.h_scale_spin.value() == 30.0
+    assert widget.axis_width.value() == 5
+    assert widget.axis_font.currentText() == "arial"
+    assert widget.axis_font_size.value() == 20
+    assert widget.color_axis_a.property("color_hex") == "#ff0000"
+    
+    # Check that settings file was updated with default values too
+    assert settings_file.exists()
+    import json
+    with open(settings_file, "r") as f:
+        data = json.load(f)
+    assert data["show_bonds"] is True
+    assert data["show_hydrogens"] is True
+    assert data["fix_h_size"] is True
+    assert data["probability"] == 50.0
+    assert data["color_axis_a"] == "#ff0000"
+
+
+
+def test_cif_viewer_widget_reset_supercell(qtbot):
+    from cif_viewer.viewer import CifViewerWidget
+    widget = CifViewerWidget()
+    qtbot.addWidget(widget)
+    
+    widget.repeat_a.setValue(3)
+    widget.repeat_b.setValue(2)
+    widget.reset_supercell()
+    assert widget.repeat_a.value() == 1
+    assert widget.repeat_b.value() == 1
+
+
+def test_cif_viewer_widget_switch_to_ellipsoids(qtbot):
+    from cif_viewer.viewer import CifViewerWidget
+    context = StubContext()
+    
+    class FakeView3DManager:
+        def __init__(self):
+            self.style = None
+        def set_3d_style(self, style):
+            self.style = style
+            
+    context.main_window.view_3d_manager = FakeView3DManager()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    widget._switch_to_ellipsoids()
+    assert context.main_window.view_3d_manager.style == "Thermal Ellipsoids"
+
+
+def test_handle_reset(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    context = StubContext()
+    initialize(context)
+    
+    reset_callback = context.reset_handlers[0]
+    
+    class FakeWidget:
+        def __init__(self):
+            self.cleared = False
+        def clear_view(self):
+            self.cleared = True
+            
+    dock = _FakeDockWidget("CIF Viewer", None)
+    widget = FakeWidget()
+    dock.setWidget(widget)
+    context.register_window("cif_viewer_panel", dock)
+    
+    reset_callback()
+    assert widget.cleared is True
+
+
+def test_cif_viewer_widget_clear_view(qtbot):
+    from cif_viewer.viewer import CifViewerWidget
+    context = StubContext()
+    
+    class FakePlotter:
+        def __init__(self):
+            self.removed = []
+            self.rendered = False
+        def remove_actor(self, name):
+            self.removed.append(name)
+        def render(self):
+            self.rendered = True
+            
+    context.plotter = FakePlotter()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    widget.overlay_actor_names = ["actor1", "actor2"]
+    widget.clear_view()
+    
+    assert context.plotter.removed == ["actor1", "actor2"]
+    assert len(widget.overlay_actor_names) == 0
+    assert context.plotter.rendered is True
+
+
+def test_cif_viewer_widget_show_hydrogens_filter(qtbot, tmp_path):
+    from cif_viewer.viewer import CifViewerWidget
+    
+    cif_file = tmp_path / "test_h.cif"
+    # A simple CIF containing H and C
+    h_cif = """data_H_test
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.0 0.0 0.0
+H1 H 0.1 0.1 0.1
+"""
+    cif_file.write_text(h_cif, encoding="utf-8")
+    
+    context = StubContext()
+    class FakePlotter:
+        def __init__(self):
+            self.cleared = False
+        def clear(self): self.cleared = True
+        def add_lines(self, *args, **kwargs): pass
+        def add_point_labels(self, *args, **kwargs): pass
+        def render(self): pass
+        def reset_camera(self): pass
+    context.plotter = FakePlotter()
+    
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    widget.load_cif(str(cif_file))
+    
+    # Run _render_now with show_hydrogens = True (default)
+    widget.show_hydrogens.setChecked(True)
+    widget._render_now()
+    assert len(widget.last_rendered_atoms) == 2
+    
+    # Run _render_now with show_hydrogens = False
+    widget.show_hydrogens.setChecked(False)
+    widget._render_now()
+    assert len(widget.last_rendered_atoms) == 1
+    assert widget.last_rendered_atoms[0].element == "C"
+
+
+def test_draw_ellipsoid_model_fix_h_size(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    import numpy as np
+    from rdkit import Chem
+    from cif_viewer import initialize
+
+    context = StubContext()
+    initialize(context)
+    draw_callback = context.styles["Thermal Ellipsoids"]
+
+    class MockAtom:
+        def __init__(self, label, element, base_index):
+            self.label = label
+            self.element = element
+            self.base_index = base_index
+            self.image = (0, 0, 0)
+            self.position = np.array([0.0, 0.0, 0.0])
+
+    class MockStructure:
+        def __init__(self):
+            # Both Carbon (0) and Hydrogen (1) have ADP covariance matrices
+            self.u_cart = np.array([
+                [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0], [0.0, 0.0, 0.1]],  # C0 ADP
+                [[0.05, 0.0, 0.0], [0.0, 0.05, 0.0], [0.0, 0.0, 0.05]], # H1 ADP
+            ])
+            self.lattice = np.eye(3)
+
+    class MockDoubleSpinBox:
+        def value(self): return 50.0
+
+    class MockCheckBox:
+        def __init__(self, checked):
+            self._checked = checked
+        def isChecked(self): return self._checked
+
+    class MockWidget:
+        def __init__(self, fix_h_size):
+            self.structure = MockStructure()
+            self.probability_spin = MockDoubleSpinBox()
+            self.h_scale_spin = MockDoubleSpinBox()
+            self.show_ellipsoid_rings = MockCheckBox(True)
+            self.fix_h_size = MockCheckBox(fix_h_size)
+            self.last_rendered_atoms = [
+                MockAtom("C1", "C", 0),
+                MockAtom("H1", "H", 1),
+            ]
+
+    class MockSettings:
+        def get(self, key, default=None): return default
+
+    class MockInitManager:
+        def __init__(self):
+            self.settings = MockSettings()
+
+    class MockPlotter:
+        def __init__(self):
+            self.cleared = False
+            self.meshes = []
+            self.background = None
+            self.lights = []
+
+        def clear(self): self.cleared = True
+        def set_background(self, color): self.background = color
+        def add_light(self, light): self.lights.append(light)
+        def render(self): pass
+        def add_mesh(self, mesh, *args, **kwargs):
+            self.meshes.append((mesh, kwargs))
+            class MockActor:
+                def GetProperty(self):
+                    class MockProp:
+                        def SetEdgeOpacity(self, o): pass
+                    return MockProp()
+            return MockActor()
+
+    mw = StubMainWindow()
+    mw.plotter = MockPlotter()
+    mw.init_manager = MockInitManager()
+
+    # Create editable mol with Carbon and Hydrogen
+    editable_mol = Chem.EditableMol(Chem.Mol())
+    editable_mol.AddAtom(Chem.Atom(6))
+    editable_mol.AddAtom(Chem.Atom(1))
+    mol = editable_mol.GetMol()
+    conformer = Chem.Conformer(2)
+    conformer.SetAtomPosition(0, (0.0, 0.0, 0.0))
+    conformer.SetAtomPosition(1, (1.0, 0.0, 0.0))
+    mol.AddConformer(conformer)
+    mol.SetProp("_from_cif_viewer", "1")
+
+    # Case 1: fix_h_size = True
+    widget_fixed = MockWidget(fix_h_size=True)
+    context.register_window("cif_viewer_panel", _FakeDockWidget("CIF Viewer", None))
+    context.get_window("cif_viewer_panel").setWidget(widget_fixed)
+
+    draw_callback(mw, mol)
+
+    # Let's see the added meshes. Since fix_h_size=True, hydrogen must fall back to fixed sphere:
+    # "cif_viewer_h_atoms" should exist, and "cif_viewer_ellipsoids" should only contain the carbon.
+    h_mesh_fixed = any(kw.get("name") == "cif_viewer_h_atoms" for mesh, kw in mw.plotter.meshes)
+    assert h_mesh_fixed is True
+
+    # Case 2: fix_h_size = False
+    mw.plotter = MockPlotter() # Reset plotter
+    widget_ellipsoid = MockWidget(fix_h_size=False)
+    context.get_window("cif_viewer_panel").setWidget(widget_ellipsoid)
+
+    draw_callback(mw, mol)
+
+    # Since fix_h_size=False, hydrogen must NOT fall back to fixed sphere, it should be drawn as an ellipsoid.
+    # So "cif_viewer_h_atoms" should NOT exist.
+    h_mesh_fixed = any(kw.get("name") == "cif_viewer_h_atoms" for mesh, kw in mw.plotter.meshes)
+    assert h_mesh_fixed is False

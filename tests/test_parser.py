@@ -6,6 +6,7 @@ from cif_viewer.parser import (
     parse_cif,
     parse_cif_number,
     supercell_edges,
+    write_supercell_cif,
 )
 
 
@@ -130,3 +131,97 @@ C1 1.0 2.0 3.0
 
     assert structure.atoms[0].element == "C"
     np.testing.assert_allclose(structure.atoms[0].fract, [0.1, 0.2, 0.3])
+
+
+def test_write_supercell_cif(tmp_path):
+    structure = parse_cif(NACL_CIF)
+    export_path = tmp_path / "supercell.cif"
+    write_supercell_cif(str(export_path), structure, (2, 1, 1), keep_connected=False)
+    
+    # Parse the exported supercell
+    exported_struct = parse_cif(export_path.read_text(encoding="utf-8"))
+    assert exported_struct.cell_lengths == (11.2804, 5.6402, 5.6402)
+    assert len(exported_struct.atoms) == 4
+    # The first atom (Na1_0_0_0)
+    assert exported_struct.atoms[0].element == "Na"
+    np.testing.assert_allclose(exported_struct.atoms[0].fract, [0.0, 0.0, 0.0])
+    
+    # Check all fractional x coordinates: they should be 0.0, 0.25, 0.5, 0.75
+    frac_xs = sorted(atom.fract[0] for atom in exported_struct.atoms)
+    np.testing.assert_allclose(frac_xs, [0.0, 0.25, 0.5, 0.75])
+
+
+def test_render_atoms_to_rdkit_mol():
+    from cif_viewer.rdkit_bridge import render_atoms_to_rdkit_mol
+    from cif_viewer.parser import RenderAtom
+    
+    atoms = [
+        RenderAtom("C1", "C", 0, (0, 0, 0), np.array([0.0, 0.0, 0.0])),
+        RenderAtom("H1", "H", 1, (0, 0, 0), np.array([1.0, 0.0, 0.0])),
+    ]
+    bonds = [(0, 1)]
+    mol = render_atoms_to_rdkit_mol(atoms, bonds)
+    assert mol.GetNumAtoms() == 2
+    assert mol.GetAtomWithIdx(0).GetSymbol() == "C"
+    assert mol.GetAtomWithIdx(1).GetSymbol() == "H"
+    assert mol.GetNumBonds() == 1
+    
+    bond = mol.GetBondBetweenAtoms(0, 1)
+    assert bond is not None
+    
+    conf = mol.GetConformer()
+    np.testing.assert_allclose(conf.GetAtomPosition(0), [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(conf.GetAtomPosition(1), [1.0, 0.0, 0.0])
+
+
+def test_parse_cif_file(tmp_path):
+    from cif_viewer.parser import parse_cif_file
+    cif_file = tmp_path / "nacl.cif"
+    cif_file.write_text(NACL_CIF, encoding="utf-8")
+    structure = parse_cif_file(str(cif_file))
+    assert structure.name == "NaCl"
+    assert len(structure.atoms) == 2
+
+
+def test_covalent_radius_and_normalize_element():
+    from cif_viewer.parser import covalent_radius, normalize_element
+    assert covalent_radius("C") == 0.76
+    assert covalent_radius("h") == 0.31
+    assert covalent_radius("Xx") == 0.77  # fallback
+    assert normalize_element(" c ") == "C"
+    assert normalize_element("Fe3+") == "Fe"
+    assert normalize_element("123") == "X"
+
+
+def test_parse_cif_number_errors():
+    import pytest
+    with pytest.raises(ValueError):
+        parse_cif_number("?")
+    with pytest.raises(ValueError):
+        parse_cif_number(".")
+
+
+def test_parse_cif_missing_atoms():
+    import pytest
+    bad_cif = """
+data_bad
+_cell_length_a 10
+_cell_length_b 10
+_cell_length_c 10
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+"""
+    with pytest.raises(ValueError):
+        parse_cif(bad_cif)
+
+
+def test_cell_vectors_invalid():
+    import pytest
+    from cif_viewer.parser import cell_vectors
+    # Gamma 180 or 0 makes sin(gamma) = 0
+    with pytest.raises(ValueError):
+        cell_vectors((10.0, 10.0, 10.0), (90.0, 90.0, 180.0))
+    # Inconsistent angles
+    with pytest.raises(ValueError):
+        cell_vectors((10.0, 10.0, 10.0), (30.0, 30.0, 120.0))

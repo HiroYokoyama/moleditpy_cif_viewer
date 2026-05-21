@@ -1,5 +1,5 @@
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.2.0"
+PLUGIN_VERSION = "0.3.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DESCRIPTION = (
     "Visualization-only CIF crystal structure viewer with unit-cell and "
@@ -32,10 +32,13 @@ def initialize(context):
                     dock_widget = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
                     if dock_widget is not None and dock_widget.widget() is not None:
                         w = dock_widget.widget()
+                        if mol is None or not hasattr(mol, "HasProp") or not mol.HasProp("_from_cif_viewer"):
+                            w.clear_view()
+                            return
                         if getattr(w, "structure", None) is not None and dock_widget.isVisible():
                             try:
                                 from PyQt6.QtCore import QTimer
-                                QTimer.singleShot(150, w.render_overlays_only)
+                                QTimer.singleShot(50, w.render_overlays_only)
                             except Exception:
                                 w.render_overlays_only()
 
@@ -96,6 +99,12 @@ def initialize(context):
             dock.widget().clear_view()
 
     def draw_ellipsoid_model(mw, mol):
+        if mol is None or not hasattr(mol, "HasProp") or not mol.HasProp("_from_cif_viewer"):
+            context.show_status_message("Thermal Ellipsoids style is only available for CIF files opened via CIF Viewer.", 4000)
+            if hasattr(mw, "view_3d_manager") and hasattr(mw.view_3d_manager, "set_3d_style"):
+                mw.view_3d_manager.set_3d_style("ball_and_stick")
+            return
+
         plotter = getattr(mw, "plotter", None)
         if plotter is None and hasattr(mw, "view_3d_manager"):
             plotter = mw.view_3d_manager.plotter
@@ -217,6 +226,7 @@ def initialize(context):
         h_colors = []
         h_radii = []
 
+        ellipsoid_meshes = []
         ellipsoid_circles_to_draw = []
 
         for index, atom in enumerate(widget.last_rendered_atoms):
@@ -233,6 +243,9 @@ def initialize(context):
                 cov = widget.structure.u_cart[base_idx]
                 
             has_cov = cov is not None and not np.allclose(cov, 0.0)
+            
+            if has_cov and symbol == "H" and widget is not None and hasattr(widget, "fix_h_size") and widget.fix_h_size.isChecked():
+                has_cov = False
             
             if has_cov:
                 try:
@@ -260,15 +273,9 @@ def initialize(context):
                     
                     ellipsoid.compute_normals(auto_orient_normals=True, inplace=True)
                     
-                    name = f"cif_viewer_ellipsoid_{index}"
-                    plotter.add_mesh(
-                        ellipsoid,
-                        color=color_rgb,
-                        opacity=1.0,
-                        name=name,
-                        style='surface',
-                        **mesh_props
-                    )
+                    # Assign point colors to the ellipsoid
+                    ellipsoid.point_data["colors"] = np.tile(color_rgb, (ellipsoid.n_points, 1))
+                    ellipsoid_meshes.append(ellipsoid)
                     
                     # Accumulate circle info to draw last
                     ellipsoid_circles_to_draw.append((index, radii, eigenvectors, pos))
@@ -291,6 +298,18 @@ def initialize(context):
                     fallback_positions.append(pos)
                     fallback_colors.append(color_rgb)
                     fallback_radii.append(rad)
+
+        if ellipsoid_meshes:
+            merged_ellipsoids = pv.merge(ellipsoid_meshes)
+            plotter.add_mesh(
+                merged_ellipsoids,
+                scalars="colors",
+                rgb=True,
+                style='surface',
+                opacity=1.0,
+                name="cif_viewer_ellipsoids",
+                **mesh_props
+            )
 
         if fallback_positions:
             fallback_source = pv.PolyData(np.array(fallback_positions))
@@ -319,7 +338,11 @@ def initialize(context):
         if widget is not None and hasattr(widget, "show_ellipsoid_rings"):
             show_rings = widget.show_ellipsoid_rings.isChecked()
         
-        if show_rings:
+        if show_rings and ellipsoid_circles_to_draw:
+            all_ring_points = []
+            all_ring_lines = []
+            current_pt_idx = 0
+            
             for index, radii, eigenvectors, pos in ellipsoid_circles_to_draw:
                 theta = np.linspace(0, 2 * np.pi, 37)
                 cos_t = np.cos(theta)
@@ -332,20 +355,28 @@ def initialize(context):
                 
                 ring_radii = radii * 1.01
                 
-                for i, base_circle in enumerate([circle_xy, circle_yz, circle_zx]):
+                for base_circle in [circle_xy, circle_yz, circle_zx]:
                     pts = np.dot(base_circle * ring_radii, eigenvectors.T) + pos
+                    all_ring_points.append(pts)
                     
-                    segments = np.empty((2 * (len(pts) - 1), 3))
-                    segments[0::2] = pts[:-1]
-                    segments[1::2] = pts[1:]
+                    line_cells = np.empty(38, dtype=np.int32)
+                    line_cells[0] = 37
+                    line_cells[1:] = np.arange(current_pt_idx, current_pt_idx + 37, dtype=np.int32)
+                    all_ring_lines.append(line_cells)
                     
-                    line_name = f"cif_viewer_ellipsoid_circle_{index}_{i}"
-                    plotter.add_lines(
-                        segments,
-                        color="black",
-                        width=2,
-                        name=line_name
-                    )
+                    current_pt_idx += 37
+                    
+            points_arr = np.concatenate(all_ring_points, axis=0)
+            lines_arr = np.concatenate(all_ring_lines, axis=0)
+            rings_mesh = pv.PolyData(points_arr, lines=lines_arr)
+            
+            plotter.add_mesh(
+                rings_mesh,
+                color="black",
+                line_width=2,
+                name="cif_viewer_ellipsoid_rings",
+                **mesh_props
+            )
 
         # Call main app's apply_3d_settings with a timer to ensure coordinate axes widget is drawn last/on top of everything else
         def render_axes():

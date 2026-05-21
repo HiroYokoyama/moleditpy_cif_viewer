@@ -20,7 +20,13 @@ Visualization-only CIF crystal structure viewer plugin for MoleditPy.
 
 ## Installation
 
-Copy the `cif_viewer` folder into MoleditPy's plugin directory, or install this repository in editable mode:
+### Setup (Standard Installation)
+1. **Download**: Download the plugin from the [Plugin Explorer](https://hiroyokoyama.github.io/moleditpy-plugins/explorer/?q=CIF+Viewer).
+2. **Install**: Unzip the downloaded file and place the `cif_viewer` folder into your application's `plugins` directory.
+3. **Launch**: Start the main application, then navigate to the **View** menu and select **CIF Viewer Panel**.
+
+### Developer Installation
+Alternatively, you can install this repository in editable mode:
 
 ```bash
 pip install -e .
@@ -28,10 +34,13 @@ pip install -e .
 
 ## Development
 
-Run the parser and plugin-contract tests:
+You can run the test suite using the provided `test_all.py` script:
 
 ```bash
-python -m pytest tests/ -v
+# Run all tests (automatically detects PyQt6 and falls back to unit tests if missing)
+python test_all.py
+
+# Explicitly run unit tests only (skipping Qt/GUI integration tests)
+python test_all.py --unit-only
 ```
 
-The tests avoid PyQt6/PyVista imports so the CIF parsing and PluginContext contract can be checked in a headless environment.
