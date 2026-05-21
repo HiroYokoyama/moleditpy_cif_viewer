@@ -5,7 +5,7 @@ PLUGIN_DESCRIPTION = (
     "Visualization-only CIF crystal structure viewer with unit-cell and "
     "supercell rendering for MoleditPy."
 )
-PLUGIN_DEPENDENCIES = ["numpy", "PyQt6", "pyvista"]
+PLUGIN_DEPENDENCIES = ["ase", "numpy", "PyQt6", "pyvista", "rdkit"]
 
 WINDOW_ID = "cif_viewer_panel"
 
@@ -45,7 +45,13 @@ def initialize(context):
         show_panel()
 
     def open_file(file_path):
-        show_panel(file_path)
+        try:
+            from PyQt6.QtCore import QTimer
+
+            QTimer.singleShot(0, lambda path=file_path: show_panel(path))
+        except Exception:
+            show_panel(file_path)
+        return True
 
     def handle_drop(file_path):
         if str(file_path).lower().endswith(".cif"):

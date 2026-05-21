@@ -7,6 +7,7 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -59,6 +60,9 @@ class CifViewerWidget(QWidget):
         form.addRow("a repeats", self.repeat_a)
         form.addRow("b repeats", self.repeat_b)
         form.addRow("c repeats", self.repeat_c)
+        reset_supercell_button = QPushButton("Reset Supercell")
+        reset_supercell_button.clicked.connect(self.reset_supercell)
+        form.addRow(reset_supercell_button)
         layout.addWidget(supercell_group)
 
         options = QWidget()
@@ -76,6 +80,24 @@ class CifViewerWidget(QWidget):
             checkbox.toggled.connect(self.render)
             options_row.addWidget(checkbox)
         layout.addWidget(options)
+
+        axis_group = QGroupBox("Cell Axis")
+        axis_form = QFormLayout(axis_group)
+        self.axis_width = QSpinBox()
+        self.axis_width.setRange(1, 12)
+        self.axis_width.setValue(5)
+        self.axis_width.valueChanged.connect(self.render)
+        self.axis_font = QComboBox()
+        self.axis_font.addItems(["arial", "courier", "times"])
+        self.axis_font.currentTextChanged.connect(self.render)
+        self.axis_font_size = QSpinBox()
+        self.axis_font_size.setRange(8, 48)
+        self.axis_font_size.setValue(20)
+        self.axis_font_size.valueChanged.connect(self.render)
+        axis_form.addRow("Axis width", self.axis_width)
+        axis_form.addRow("Font", self.axis_font)
+        axis_form.addRow("Font size", self.axis_font_size)
+        layout.addWidget(axis_group)
 
         self.summary_label = QLabel(
             "Load a CIF file to visualize the completed unit cell and supercell."
@@ -99,6 +121,13 @@ class CifViewerWidget(QWidget):
         spin.setValue(1)
         spin.valueChanged.connect(self.render)
         return spin
+
+    def reset_supercell(self):
+        for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
+            spin.blockSignals(True)
+            spin.setValue(1)
+            spin.blockSignals(False)
+        self.render()
 
     def _choose_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -186,21 +215,28 @@ class CifViewerWidget(QWidget):
 
     def _draw_with_moleditpy(self, mol):
         if self.context is not None and hasattr(self.context, "draw_molecule_3d"):
-            self.context.draw_molecule_3d(mol)
+            try:
+                self.context.current_mol = mol
+            except Exception:
+                self.context.draw_molecule_3d(mol)
             return
         main_window = self._main_window()
         if main_window is not None and hasattr(main_window, "draw_molecule_3d"):
+            if hasattr(main_window, "view_3d_manager"):
+                try:
+                    main_window.view_3d_manager.current_mol = mol
+                except Exception:
+                    pass
             main_window.draw_molecule_3d(mol)
 
     def _draw_cell_overlay(self, plotter, repeats):
         lattice = np.asarray(self.structure.lattice, dtype=float)
-        repeated_lattice = lattice * np.asarray(repeats, dtype=float)[:, None]
         for index, (start, end, color, label) in enumerate(
-            celleditpy_cell_axis_segments(repeated_lattice)
+            celleditpy_cell_axis_segments(lattice)
         ):
             name = f"cif_viewer_cell_line_{index}"
             is_axis = bool(label and self.show_axes.isChecked())
-            width = 5 if is_axis else 3
+            width = self.axis_width.value() if is_axis else max(1, self.axis_width.value() - 2)
             line_color = color if is_axis else "white"
             plotter.add_lines(np.array([start, end]), color=line_color, width=width, name=name)
             self.overlay_actor_names.append(name)
@@ -210,8 +246,9 @@ class CifViewerWidget(QWidget):
                     [end],
                     [label],
                     point_size=0,
-                    font_size=20,
+                    font_size=self.axis_font_size.value(),
                     text_color=color,
+                    font_family=self.axis_font.currentText(),
                     bold=True,
                     always_visible=True,
                     shape=None,
@@ -221,8 +258,7 @@ class CifViewerWidget(QWidget):
 
     def _cell_center(self, repeats):
         lattice = np.asarray(self.structure.lattice, dtype=float)
-        repeated_lattice = lattice * np.asarray(repeats, dtype=float)[:, None]
-        return np.sum(repeated_lattice, axis=0) / 2.0
+        return np.sum(lattice, axis=0) / 2.0
 
     def _enter_viewer_mode(self):
         main_window = self._main_window()
