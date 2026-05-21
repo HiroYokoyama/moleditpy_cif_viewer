@@ -33,11 +33,21 @@ def initialize(context):
                 main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             if hasattr(context, "register_window"):
                 context.register_window(WINDOW_ID, dock)
+            
+            dock.show()
+            dock.raise_()
         else:
             widget = dock.widget()
+            if file_path is None:
+                if dock.isVisible():
+                    dock.hide()
+                else:
+                    dock.show()
+                    dock.raise_()
+            else:
+                dock.show()
+                dock.raise_()
 
-        dock.show()
-        dock.raise_()
         if file_path:
             widget.load_cif(file_path)
 
@@ -186,6 +196,8 @@ def initialize(context):
         h_colors = []
         h_radii = []
 
+        ellipsoid_circles_to_draw = []
+
         for index, atom in enumerate(widget.last_rendered_atoms):
             if index >= mol.GetNumAtoms():
                 continue
@@ -237,36 +249,8 @@ def initialize(context):
                         **mesh_props
                     )
                     
-                    show_rings = True
-                    if widget is not None and hasattr(widget, "show_ellipsoid_rings"):
-                        show_rings = widget.show_ellipsoid_rings.isChecked()
-                    
-                    if show_rings:
-                        theta = np.linspace(0, 2 * np.pi, 37)
-                        cos_t = np.cos(theta)
-                        sin_t = np.sin(theta)
-                        zero_t = np.zeros_like(theta)
-                        
-                        circle_xy = np.column_stack((cos_t, sin_t, zero_t))
-                        circle_yz = np.column_stack((zero_t, cos_t, sin_t))
-                        circle_zx = np.column_stack((sin_t, zero_t, cos_t))
-                        
-                        ring_radii = radii * 1.01
-                        
-                        for i, base_circle in enumerate([circle_xy, circle_yz, circle_zx]):
-                            pts = np.dot(base_circle * ring_radii, eigenvectors.T) + pos
-                            
-                            segments = np.empty((2 * (len(pts) - 1), 3))
-                            segments[0::2] = pts[:-1]
-                            segments[1::2] = pts[1:]
-                            
-                            line_name = f"cif_viewer_ellipsoid_circle_{index}_{i}"
-                            plotter.add_lines(
-                                segments,
-                                color="black",
-                                width=2,
-                                name=line_name
-                            )
+                    # Accumulate circle info to draw last
+                    ellipsoid_circles_to_draw.append((index, radii, eigenvectors, pos))
                 except Exception as exc:
                     print(f"Error drawing ellipsoid for {atom.element}: {exc}")
             else:
@@ -309,7 +293,54 @@ def initialize(context):
             )
             plotter.add_mesh(h_glyphs, scalars="colors", rgb=True, style='surface', opacity=1.0, name="cif_viewer_h_atoms", **mesh_props)
 
-        plotter.render()
+        # Draw ellipsoid circles (rings) last to prevent them from being obscured or clipped by the solid meshes
+        show_rings = True
+        if widget is not None and hasattr(widget, "show_ellipsoid_rings"):
+            show_rings = widget.show_ellipsoid_rings.isChecked()
+        
+        if show_rings:
+            for index, radii, eigenvectors, pos in ellipsoid_circles_to_draw:
+                theta = np.linspace(0, 2 * np.pi, 37)
+                cos_t = np.cos(theta)
+                sin_t = np.sin(theta)
+                zero_t = np.zeros_like(theta)
+                
+                circle_xy = np.column_stack((cos_t, sin_t, zero_t))
+                circle_yz = np.column_stack((zero_t, cos_t, sin_t))
+                circle_zx = np.column_stack((sin_t, zero_t, cos_t))
+                
+                ring_radii = radii * 1.01
+                
+                for i, base_circle in enumerate([circle_xy, circle_yz, circle_zx]):
+                    pts = np.dot(base_circle * ring_radii, eigenvectors.T) + pos
+                    
+                    segments = np.empty((2 * (len(pts) - 1), 3))
+                    segments[0::2] = pts[:-1]
+                    segments[1::2] = pts[1:]
+                    
+                    line_name = f"cif_viewer_ellipsoid_circle_{index}_{i}"
+                    plotter.add_lines(
+                        segments,
+                        color="black",
+                        width=2,
+                        name=line_name
+                    )
+
+        # Call main app's apply_3d_settings with a timer to ensure coordinate axes widget is drawn last/on top of everything else
+        def render_axes():
+            if hasattr(mw, "view_3d_manager") and hasattr(mw.view_3d_manager, "apply_3d_settings"):
+                try:
+                    mw.view_3d_manager.apply_3d_settings(redraw=False)
+                except Exception:
+                    plotter.render()
+            else:
+                plotter.render()
+
+        try:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(50, render_axes)
+        except Exception:
+            render_axes()
 
     context.add_menu_action("View/CIF Viewer Panel", open_from_menu)
 

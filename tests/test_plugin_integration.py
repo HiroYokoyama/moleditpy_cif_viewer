@@ -147,7 +147,13 @@ def _install_fake_qt(monkeypatch):
         def greenF(self): return 0.5
         def blueF(self): return 0.5
 
+    class FakeQTimer:
+        @staticmethod
+        def singleShot(ms, cb):
+            cb()
+
     qtcore.Qt = Qt
+    qtcore.QTimer = FakeQTimer
     qtwidgets.QDockWidget = _FakeDockWidget
     qtgui.QColor = FakeQColor
 
@@ -267,9 +273,19 @@ def test_draw_ellipsoid_model(monkeypatch):
         def render(self):
             self.rendered = True
 
+    class MockView3DManager:
+        def __init__(self):
+            self.apply_3d_settings_called = False
+            self.apply_3d_settings_redraw = None
+
+        def apply_3d_settings(self, redraw=True):
+            self.apply_3d_settings_called = True
+            self.apply_3d_settings_redraw = redraw
+
     mw = StubMainWindow()
     mw.plotter = MockPlotter()
     mw.init_manager = MockInitManager()
+    mw.view_3d_manager = MockView3DManager()
     
     widget = MockWidget()
     context.register_window("cif_viewer_panel", _FakeDockWidget("CIF Viewer", None))
@@ -296,6 +312,12 @@ def test_draw_ellipsoid_model(monkeypatch):
     assert mw.plotter.cleared
     # We should have meshes added
     assert len(mw.plotter.meshes) > 0
+    # We should have ellipsoid circle lines added
+    assert len(mw.plotter.lines) > 0
+
+    # Verify apply_3d_settings was called on view_3d_manager to draw axis widget last
+    assert mw.view_3d_manager.apply_3d_settings_called
+    assert mw.view_3d_manager.apply_3d_settings_redraw is False
 
     # Let's inspect the opacity and properties of the added meshes
     ellipsoid_mesh = None
@@ -317,3 +339,44 @@ def test_draw_ellipsoid_model(monkeypatch):
 
     assert c_mesh is not None
     assert c_mesh[1]["opacity"] == 1.0
+
+
+def test_menu_action_toggles_dock_widget(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    
+    # Mock viewer widget class
+    fake_viewer = types.ModuleType("cif_viewer.viewer")
+    fake_viewer.CifViewerWidget = _FakeViewerWidget
+    monkeypatch.setitem(sys.modules, "cif_viewer.viewer", fake_viewer)
+    
+    context = StubContext()
+    initialize(context)
+
+    action = context.menu_actions[0][1] # open_from_menu / show_panel
+    assert callable(action)
+
+    # First click: Dock doesn't exist, should create it, show it and register it.
+    action()
+    assert "cif_viewer_panel" in context.windows
+    dock = context.windows["cif_viewer_panel"]
+    assert dock.shown is True
+    assert dock.raised is True
+
+    # Setup visibility controls on fake dock
+    dock._visible = True
+    dock.isVisible = lambda: dock._visible
+    
+    def hide():
+        dock._visible = False
+    def show():
+        dock._visible = True
+    dock.hide = hide
+    dock.show = show
+
+    # Second click: Dock exists and is visible -> should hide it
+    action()
+    assert dock._visible is False
+
+    # Third click: Dock exists and is hidden -> should show it
+    action()
+    assert dock._visible is True
