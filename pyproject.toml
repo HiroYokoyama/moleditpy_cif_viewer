@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moleditpy-cif-viewer"
+version = "0.1.0"
+description = "Visualization-only CIF crystal structure viewer plugin for MoleditPy"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "HiroYokoyama" }]
+dependencies = [
+    "ase",
+    "numpy",
+    "PyQt6",
+    "pyvista",
+    "rdkit",
+]
+
+[tool.setuptools.packages.find]
+include = ["cif_viewer*"]
