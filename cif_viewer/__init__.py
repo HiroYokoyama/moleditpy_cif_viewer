@@ -208,7 +208,7 @@ def initialize(context):
                 except Exception:
                     scale_factor = 1.5382
 
-        h_scale = 0.3
+        h_scale = 0.2
         if widget is not None and hasattr(widget, "h_scale_spin"):
             h_scale = widget.h_scale_spin.value() / 100.0
         

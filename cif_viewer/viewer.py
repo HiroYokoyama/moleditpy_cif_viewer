@@ -220,7 +220,7 @@ class CifViewerWidget(QWidget):
         self.h_scale_spin = QDoubleSpinBox()
         self.h_scale_spin.setRange(1.0, 100.0)
         self.h_scale_spin.setSingleStep(5.0)
-        self.h_scale_spin.setValue(30.0)
+        self.h_scale_spin.setValue(20.0)
         self.h_scale_spin.setDecimals(1)
         self.h_scale_spin.editingFinished.connect(self.render)
         self.h_scale_spin.editingFinished.connect(self.save_settings)
@@ -336,7 +336,7 @@ class CifViewerWidget(QWidget):
             self.show_ellipsoid_rings.setChecked(True)
             self.fix_h_size.setChecked(True)
             self.probability_spin.setValue(50.0)
-            self.h_scale_spin.setValue(30.0)
+            self.h_scale_spin.setValue(20.0)
             self.axis_width.setValue(5)
             
             idx = self.axis_font.findText("arial")

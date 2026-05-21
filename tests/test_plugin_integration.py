@@ -567,7 +567,7 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     assert widget.show_ellipsoid_rings.isChecked() is True
     assert widget.fix_h_size.isChecked() is True
     assert widget.probability_spin.value() == 50.0
-    assert widget.h_scale_spin.value() == 30.0
+    assert widget.h_scale_spin.value() == 20.0
     assert widget.axis_width.value() == 5
     assert widget.axis_font.currentText() == "arial"
     assert widget.axis_font_size.value() == 20
