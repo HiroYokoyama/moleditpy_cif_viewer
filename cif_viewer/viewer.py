@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -287,6 +288,31 @@ class CifViewerWidget(QWidget):
         self.axis_font_size.valueChanged.connect(self.save_settings)
         cell_axes_layout.addRow("Font size", self.axis_font_size)
 
+        # View from axis buttons
+        view_grid = QGridLayout()
+        btn_a = QPushButton("a")
+        btn_a.clicked.connect(lambda: self.view_from_axis("a"))
+        btn_b = QPushButton("b")
+        btn_b.clicked.connect(lambda: self.view_from_axis("b"))
+        btn_c = QPushButton("c")
+        btn_c.clicked.connect(lambda: self.view_from_axis("c"))
+        
+        btn_na = QPushButton("-a")
+        btn_na.clicked.connect(lambda: self.view_from_axis("-a"))
+        btn_nb = QPushButton("-b")
+        btn_nb.clicked.connect(lambda: self.view_from_axis("-b"))
+        btn_nc = QPushButton("-c")
+        btn_nc.clicked.connect(lambda: self.view_from_axis("-c"))
+
+        view_grid.addWidget(btn_a, 0, 0)
+        view_grid.addWidget(btn_b, 0, 1)
+        view_grid.addWidget(btn_c, 0, 2)
+        view_grid.addWidget(btn_na, 1, 0)
+        view_grid.addWidget(btn_nb, 1, 1)
+        view_grid.addWidget(btn_nc, 1, 2)
+        cell_axes_layout.addRow("View axis:", view_grid)
+
+
         # Color settings
         self.color_axis_a = self._create_color_button("#ff0000")
         self.color_axis_b = self._create_color_button("#00ff00")
@@ -334,6 +360,84 @@ class CifViewerWidget(QWidget):
 
     def reset_supercell(self):
         self.set_supercell_preset(1)
+
+    def view_from_axis(self, axis_name: str):
+        if self.structure is None:
+            return
+        plotter = self._plotter()
+        if plotter is None:
+            return
+
+        lattice = np.asarray(self.structure.lattice, dtype=float)
+        
+        if axis_name == "a":
+            direction = lattice[0]
+            view_up = lattice[2]
+        elif axis_name == "-a":
+            direction = -lattice[0]
+            view_up = lattice[2]
+        elif axis_name == "b":
+            direction = lattice[1]
+            view_up = lattice[2]
+        elif axis_name == "-b":
+            direction = -lattice[1]
+            view_up = lattice[2]
+        elif axis_name == "c":
+            direction = lattice[2]
+            view_up = lattice[1]
+        elif axis_name == "-c":
+            direction = -lattice[2]
+            view_up = lattice[1]
+        else:
+            return
+
+        dir_norm = np.linalg.norm(direction)
+        if dir_norm == 0:
+            return
+        dir_unit = direction / dir_norm
+
+        up_norm = np.linalg.norm(view_up)
+        if up_norm > 0:
+            up_unit = view_up / up_norm
+        else:
+            up_unit = np.array([0.0, 0.0, 1.0])
+
+        repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
+        focal_point = self._cell_center(repeats)
+        
+        # Calculate maximum cell dimension to place the camera outside
+        scaled_a = lattice[0] * repeats[0]
+        scaled_b = lattice[1] * repeats[1]
+        scaled_c = lattice[2] * repeats[2]
+        max_dim = max(
+            np.linalg.norm(scaled_a),
+            np.linalg.norm(scaled_b),
+            np.linalg.norm(scaled_c)
+        )
+        distance = max_dim * 2.0
+        if distance == 0:
+            distance = 10.0
+
+        camera_position = focal_point + dir_unit * distance
+
+        try:
+            plotter.camera_position = (camera_position, focal_point, up_unit)
+        except Exception:
+            try:
+                if hasattr(plotter, "camera"):
+                    plotter.camera.position = camera_position
+                    plotter.camera.focal_point = focal_point
+                    plotter.camera.up = up_unit
+            except Exception:
+                pass
+
+        self._reset_camera_on_next_render = False
+
+        try:
+            plotter.reset_camera()
+            plotter.render()
+        except Exception:
+            pass
 
     def reset_to_defaults(self):
         self.show_bonds.blockSignals(True)
@@ -395,8 +499,16 @@ class CifViewerWidget(QWidget):
     def _switch_to_ellipsoids(self):
         if self.context is not None:
             mw = self.context.get_main_window()
-            if mw is not None and hasattr(mw, "view_3d_manager"):
-                mw.view_3d_manager.set_3d_style("Thermal Ellipsoids")
+            if mw is not None:
+                if hasattr(mw, "init_manager") and hasattr(mw.init_manager, "style_button"):
+                    style_btn = mw.init_manager.style_button
+                    if style_btn is not None and style_btn.menu() is not None:
+                        for action in style_btn.menu().actions():
+                            if action.text() == "Thermal Ellipsoids":
+                                action.setChecked(True)
+                                break
+                if hasattr(mw, "view_3d_manager"):
+                    mw.view_3d_manager.set_3d_style("Thermal Ellipsoids")
 
     def _choose_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -725,7 +837,7 @@ class CifViewerWidget(QWidget):
             name = f"cif_viewer_cell_line_{index}"
             is_axis = bool(label and self.show_axes.isChecked())
             width = self.axis_width.value() if is_axis else max(1, self.axis_width.value() - 2)
-            
+
             if is_axis:
                 if label == "a":
                     line_color = color_a

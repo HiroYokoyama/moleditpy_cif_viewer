@@ -648,12 +648,54 @@ def test_cif_viewer_widget_switch_to_ellipsoids(qtbot):
         def set_3d_style(self, style):
             self.style = style
             
+    class MockAction:
+        def __init__(self, text):
+            self._text = text
+            self._checked = False
+
+        def text(self):
+            return self._text
+
+        def setChecked(self, checked):
+            self._checked = checked
+
+        def isChecked(self):
+            return self._checked
+
+    class MockMenu:
+        def __init__(self, actions):
+            self._actions = actions
+
+        def actions(self):
+            return self._actions
+
+    class MockStyleButton:
+        def __init__(self, menu):
+            self._menu = menu
+
+        def menu(self):
+            return self._menu
+
+    class MockInitManager:
+        def __init__(self, style_button):
+            self.style_button = style_button
+
+    action_other = MockAction("Ball and Stick")
+    action_ellip = MockAction("Thermal Ellipsoids")
+    menu = MockMenu([action_other, action_ellip])
+    style_button = MockStyleButton(menu)
+    init_manager = MockInitManager(style_button)
+
+    context.main_window.init_manager = init_manager
     context.main_window.view_3d_manager = FakeView3DManager()
+    
     widget = CifViewerWidget(context=context)
     qtbot.addWidget(widget)
     
     widget._switch_to_ellipsoids()
     assert context.main_window.view_3d_manager.style == "Thermal Ellipsoids"
+    assert action_ellip.isChecked() is True
+    assert action_other.isChecked() is False
 
 
 def test_handle_reset(monkeypatch):
@@ -865,3 +907,83 @@ def test_draw_ellipsoid_model_fix_h_size(monkeypatch):
     # So "cif_viewer_h_atoms" should NOT exist.
     h_mesh_fixed = any(kw.get("name") == "cif_viewer_h_atoms" for mesh, kw in mw.plotter.meshes)
     assert h_mesh_fixed is False
+
+
+def test_cif_viewer_widget_view_from_axis(qtbot):
+    from cif_viewer.viewer import CifViewerWidget
+    import numpy as np
+    
+    class MockCamera:
+        def __init__(self):
+            self.position = [0, 0, 0]
+            self.focal_point = [0, 0, 0]
+            self.up = [0, 0, 1]
+
+    class MockPlotter:
+        def __init__(self):
+            self.camera = MockCamera()
+            self._camera_position = None
+            self.rendered = False
+            self.camera_reset = False
+            
+        @property
+        def camera_position(self):
+            return self._camera_position
+            
+        @camera_position.setter
+        def camera_position(self, value):
+            self._camera_position = value
+            self.camera.position = value[0]
+            self.camera.focal_point = value[1]
+            self.camera.up = value[2]
+            
+        def reset_camera(self):
+            self.camera_reset = True
+            
+        def render(self):
+            self.rendered = True
+
+    plotter = MockPlotter()
+    context = StubContext()
+    context.plotter = plotter
+    
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    
+    class FakeStructure:
+        def __init__(self):
+            self.lattice = np.eye(3)
+            self.atoms = []
+            
+    widget.structure = FakeStructure()
+    
+    # Test a axis
+    widget.view_from_axis("a")
+    assert plotter.camera_position is not None
+    pos, focal, up = plotter.camera_position
+    assert np.allclose(focal, [0.5, 0.5, 0.5])
+    # direction from focal point to camera is +a (which is [1, 0, 0])
+    assert np.allclose(pos - focal, [2.0, 0.0, 0.0])
+    assert np.allclose(up, [0.0, 0.0, 1.0])
+    assert plotter.camera_reset is True
+    assert plotter.rendered is True
+    assert widget._reset_camera_on_next_render is False
+
+    # Test b axis
+    widget.view_from_axis("b")
+    pos, focal, up = plotter.camera_position
+    assert np.allclose(pos - focal, [0.0, 2.0, 0.0])
+    assert np.allclose(up, [0.0, 0.0, 1.0])
+
+    # Test c axis
+    widget.view_from_axis("c")
+    pos, focal, up = plotter.camera_position
+    assert np.allclose(pos - focal, [0.0, 0.0, 2.0])
+    assert np.allclose(up, [0.0, 1.0, 0.0])
+
+    # Test -a axis
+    widget.view_from_axis("-a")
+    pos, focal, up = plotter.camera_position
+    assert np.allclose(pos - focal, [-2.0, 0.0, 0.0])
+    assert np.allclose(up, [0.0, 0.0, 1.0])
+
