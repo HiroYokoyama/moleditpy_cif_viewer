@@ -129,7 +129,8 @@ def _install_fake_qt(monkeypatch):
         RightDockWidgetArea = 2
 
     class Qt:
-        DockWidgetArea = DockWidgetArea
+        pass
+    Qt.DockWidgetArea = DockWidgetArea
 
     qtcore.Qt = Qt
     qtwidgets.QDockWidget = _FakeDockWidget

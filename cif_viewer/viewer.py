@@ -18,6 +18,10 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QAbstractItemView,
 )
 
 from .parser import (
@@ -25,6 +29,7 @@ from .parser import (
     celleditpy_cell_axis_segments,
     expand_supercell,
     parse_cif_file,
+    parse_cif_file_pymatgen,
 )
 from .rdkit_bridge import render_atoms_to_rdkit_mol
 
@@ -35,10 +40,12 @@ class CifViewerWidget(QWidget):
     def __init__(self, parent=None, context=None):
         super().__init__(parent)
         self.context = context
+        self.all_structures = []
         self.structure: Optional[CifStructure] = None
         self.current_path: Optional[str] = None
         self.overlay_actor_names = []
         self._build_ui()
+        self.load_settings()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -51,6 +58,17 @@ class CifViewerWidget(QWidget):
         file_row.addWidget(self.file_label, 1)
         file_row.addWidget(open_button)
         layout.addLayout(file_row)
+
+        self.structure_table = QTableWidget()
+        self.structure_table.setColumnCount(2)
+        self.structure_table.setHorizontalHeaderLabels(["Structure", "Atoms"])
+        self.structure_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.structure_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.structure_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.structure_table.setFixedHeight(120)
+        self.structure_table.itemSelectionChanged.connect(self._structure_selected)
+        self.structure_table.setVisible(False)
+        layout.addWidget(self.structure_table)
 
         supercell_group = QGroupBox("Supercell")
         form = QFormLayout(supercell_group)
@@ -76,9 +94,19 @@ class CifViewerWidget(QWidget):
         self.show_cell.setChecked(True)
         self.show_axes = QCheckBox("a/b/c axes")
         self.show_axes.setChecked(True)
-        for checkbox in (self.show_bonds, self.keep_connected, self.show_cell, self.show_axes):
+        self.show_ellipsoids = QCheckBox("Ellipsoids")
+        self.show_ellipsoids.setChecked(True)
+        for checkbox in (self.show_bonds, self.keep_connected, self.show_cell, self.show_axes, self.show_ellipsoids):
             checkbox.toggled.connect(self.render)
+            checkbox.toggled.connect(self.save_settings)
             options_row.addWidget(checkbox)
+            
+        self.probability_combo = QComboBox()
+        self.probability_combo.addItems(["50% (1.54)", "90% (2.50)", "95% (2.79)", "99% (3.40)"])
+        self.probability_combo.setCurrentText("50% (1.54)")
+        self.probability_combo.currentTextChanged.connect(self.render)
+        self.probability_combo.currentTextChanged.connect(self.save_settings)
+        options_row.addWidget(self.probability_combo)
         layout.addWidget(options)
 
         axis_group = QGroupBox("Cell Axis")
@@ -87,13 +115,16 @@ class CifViewerWidget(QWidget):
         self.axis_width.setRange(1, 12)
         self.axis_width.setValue(5)
         self.axis_width.valueChanged.connect(self.render)
+        self.axis_width.valueChanged.connect(self.save_settings)
         self.axis_font = QComboBox()
         self.axis_font.addItems(["arial", "courier", "times"])
         self.axis_font.currentTextChanged.connect(self.render)
+        self.axis_font.currentTextChanged.connect(self.save_settings)
         self.axis_font_size = QSpinBox()
         self.axis_font_size.setRange(8, 48)
         self.axis_font_size.setValue(20)
         self.axis_font_size.valueChanged.connect(self.render)
+        self.axis_font_size.valueChanged.connect(self.save_settings)
         axis_form.addRow("Axis width", self.axis_width)
         axis_form.addRow("Font", self.axis_font)
         axis_form.addRow("Font size", self.axis_font_size)
@@ -139,17 +170,131 @@ class CifViewerWidget(QWidget):
         if path:
             self.load_cif(path)
 
+    def _structure_selected(self):
+        selected_ranges = self.structure_table.selectedRanges()
+        if not selected_ranges or not self.all_structures:
+            return
+        row = selected_ranges[0].topRow()
+        if 0 <= row < len(self.all_structures):
+            self.structure = self.all_structures[row]
+            self.render()
+
+    def _settings_path(self):
+        return os.path.join(os.path.dirname(__file__), "settings.json")
+
+    def load_settings(self):
+        path = self._settings_path()
+        if not os.path.exists(path):
+            return
+        import json
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.show_bonds.blockSignals(True)
+            self.keep_connected.blockSignals(True)
+            self.show_cell.blockSignals(True)
+            self.show_axes.blockSignals(True)
+            self.show_ellipsoids.blockSignals(True)
+            self.probability_combo.blockSignals(True)
+            self.axis_width.blockSignals(True)
+            self.axis_font.blockSignals(True)
+            self.axis_font_size.blockSignals(True)
+            
+            if "show_bonds" in data:
+                self.show_bonds.setChecked(bool(data["show_bonds"]))
+            if "keep_connected" in data:
+                self.keep_connected.setChecked(bool(data["keep_connected"]))
+            if "show_cell" in data:
+                self.show_cell.setChecked(bool(data["show_cell"]))
+            if "show_axes" in data:
+                self.show_axes.setChecked(bool(data["show_axes"]))
+            if "show_ellipsoids" in data:
+                self.show_ellipsoids.setChecked(bool(data["show_ellipsoids"]))
+            if "probability" in data:
+                idx = self.probability_combo.findText(str(data["probability"]))
+                if idx >= 0:
+                    self.probability_combo.setCurrentIndex(idx)
+            if "axis_width" in data:
+                self.axis_width.setValue(int(data["axis_width"]))
+            if "axis_font" in data:
+                idx = self.axis_font.findText(str(data["axis_font"]))
+                if idx >= 0:
+                    self.axis_font.setCurrentIndex(idx)
+            if "axis_font_size" in data:
+                self.axis_font_size.setValue(int(data["axis_font_size"]))
+        except Exception:
+            pass
+        finally:
+            self.show_bonds.blockSignals(False)
+            self.keep_connected.blockSignals(False)
+            self.show_cell.blockSignals(False)
+            self.show_axes.blockSignals(False)
+            self.show_ellipsoids.blockSignals(False)
+            self.probability_combo.blockSignals(False)
+            self.axis_width.blockSignals(False)
+            self.axis_font.blockSignals(False)
+            self.axis_font_size.blockSignals(False)
+
+    def save_settings(self, *args):
+        path = self._settings_path()
+        import json
+        data = {
+            "show_bonds": self.show_bonds.isChecked(),
+            "keep_connected": self.keep_connected.isChecked(),
+            "show_cell": self.show_cell.isChecked(),
+            "show_axes": self.show_axes.isChecked(),
+            "show_ellipsoids": self.show_ellipsoids.isChecked(),
+            "probability": self.probability_combo.currentText(),
+            "axis_width": self.axis_width.value(),
+            "axis_font": self.axis_font.currentText(),
+            "axis_font_size": self.axis_font_size.value(),
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+        except Exception:
+            pass
+
     def load_cif(self, path: str):
         try:
-            self.structure = parse_cif_file(path)
-        except Exception as exc:
-            QMessageBox.critical(self, "CIF Viewer", f"Could not read CIF file:\n{exc}")
+            self.all_structures = parse_cif_file_pymatgen(path)
+        except Exception:
+            try:
+                self.all_structures = [parse_cif_file(path)]
+            except Exception as exc:
+                QMessageBox.critical(self, "CIF Viewer", f"Could not read CIF file:\n{exc}")
+                return
+                
+        if not self.all_structures:
+            QMessageBox.critical(self, "CIF Viewer", "No valid structures found in CIF file.")
             return
 
         self.current_path = path
         self.file_label.setText(os.path.basename(path))
+        
+        self.structure_table.blockSignals(True)
+        self.structure_table.setRowCount(len(self.all_structures))
+        for i, struct in enumerate(self.all_structures):
+            name_item = QTableWidgetItem(struct.name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            atoms_item = QTableWidgetItem(str(len(struct.atoms)))
+            atoms_item.setFlags(atoms_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.structure_table.setItem(i, 0, name_item)
+            self.structure_table.setItem(i, 1, atoms_item)
+            
+        if len(self.all_structures) > 1:
+            self.structure_table.setVisible(True)
+            self.structure_table.selectRow(0)
+            self.structure = self.all_structures[0]
+        else:
+            self.structure_table.setVisible(False)
+            self.structure = self.all_structures[0]
+            
+        self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
-        self.render()
+        
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self.render)
 
     def clear_view(self):
         plotter = self._plotter()
@@ -196,6 +341,9 @@ class CifViewerWidget(QWidget):
 
         if self.show_cell.isChecked():
             self._draw_cell_overlay(plotter, repeats)
+
+        if self.show_ellipsoids.isChecked() and self.structure.u_cart is not None:
+            self._draw_ellipsoid_overlay(plotter, atoms)
 
         try:
             plotter.reset_camera()
@@ -255,6 +403,77 @@ class CifViewerWidget(QWidget):
                     name=label_name,
                 )
                 self.overlay_actor_names.append(label_name)
+
+    def _draw_ellipsoid_overlay(self, plotter, atoms):
+        import pyvista as pv
+        import re
+        
+        ELEMENT_COLORS = {
+            "H": "#FFFFFF", "He": "#D9FFFF", "Li": "#CC80FF", "Be": "#C2FF00",
+            "B": "#FFB5B5", "C": "#909090", "N": "#3050F8", "O": "#FF0D0D",
+            "F": "#90E050", "Ne": "#B3E3F5", "Na": "#AB5CF2", "Mg": "#8AFF00",
+            "Al": "#BFA6A6", "Si": "#F0C8A0", "P": "#FF8000", "S": "#E6C800",
+            "Cl": "#1FF01F", "Ar": "#80D1E3", "K": "#8F40D4", "Ca": "#3DFF00",
+            "Fe": "#E06633", "Cu": "#C88033", "Zn": "#7D80B0",
+        }
+        
+        prob_text = self.probability_combo.currentText()
+        match = re.search(r"\(([\d\.]+)\)", prob_text)
+        scale_factor = float(match.group(1)) if match else 1.54
+
+        for index, atom in enumerate(atoms):
+            base_idx = atom.base_index
+            if base_idx >= len(self.structure.u_cart):
+                continue
+            cov = self.structure.u_cart[base_idx]
+            if cov is None or np.allclose(cov, 0.0):
+                continue
+            
+            try:
+                eigenvalues, eigenvectors = np.linalg.eig(cov)
+                eigenvalues = np.maximum(eigenvalues, 1e-5)
+                radii = np.sqrt(eigenvalues) * scale_factor
+                
+                ellipsoid = pv.ParametricEllipsoid(
+                    xradius=radii[0],
+                    yradius=radii[1],
+                    zradius=radii[2],
+                    u_res=20,
+                    v_res=20
+                )
+                
+                rotation_matrix = np.eye(4)
+                rotation_matrix[:3, :3] = eigenvectors
+                ellipsoid.transform(rotation_matrix, inplace=True)
+                ellipsoid.translate(atom.position, inplace=True)
+                
+                color = ELEMENT_COLORS.get(atom.element, "#00FFFF")
+                name = f"cif_viewer_ellipsoid_{index}"
+                
+                plotter.add_mesh(
+                    ellipsoid,
+                    color=color,
+                    opacity=1.0,
+                    name=name,
+                    style='surface'
+                )
+                self.overlay_actor_names.append(name)
+                
+                for i in range(3):
+                    vec = eigenvectors[:, i] * radii[i]
+                    start_pt = atom.position - vec
+                    end_pt = atom.position + vec
+                    line_name = f"cif_viewer_ellipsoid_axis_{index}_{i}"
+                    plotter.add_lines(
+                        np.array([start_pt, end_pt]),
+                        color="black",
+                        width=2,
+                        name=line_name
+                    )
+                    self.overlay_actor_names.append(line_name)
+                    
+            except Exception as exc:
+                print(f"Error drawing ellipsoid for {atom.label}: {exc}")
 
     def _cell_center(self, repeats):
         lattice = np.asarray(self.structure.lattice, dtype=float)

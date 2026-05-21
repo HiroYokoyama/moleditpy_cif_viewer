@@ -1,11 +1,11 @@
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.2.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DESCRIPTION = (
     "Visualization-only CIF crystal structure viewer with unit-cell and "
     "supercell rendering for MoleditPy."
 )
-PLUGIN_DEPENDENCIES = ["ase", "numpy", "PyQt6", "pyvista", "rdkit"]
+PLUGIN_DEPENDENCIES = ["numpy", "pymatgen", "PyQt6", "pyvista", "rdkit"]
 
 WINDOW_ID = "cif_viewer_panel"
 

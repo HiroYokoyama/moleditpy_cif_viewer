@@ -28,6 +28,7 @@ class CifStructure:
     cell_angles: Tuple[float, float, float]
     lattice: np.ndarray
     atoms: Tuple[CifAtom, ...]
+    u_cart: Optional[np.ndarray] = None
 
 
 @dataclass(frozen=True)
@@ -40,51 +41,119 @@ class RenderAtom:
 
 
 def parse_cif_file(path: str) -> CifStructure:
-    ase_structure = _parse_cif_file_with_ase(path)
-    if ase_structure is not None:
-        return ase_structure
     with open(path, "r", encoding="utf-8") as handle:
         return parse_cif(handle.read(), name=path)
 
 
-def _parse_cif_file_with_ase(path: str) -> Optional[CifStructure]:
-    try:
-        import ase.io
-    except ImportError:
-        return None
+def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
+    from pymatgen.io.cif import CifParser
+    parser = CifParser(path)
+    structures = []
+    
+    for name, block in parser._cif.data.items():
+        try:
+            struct = parser._get_structure(block, primitive=False, symmetrized=False)
+            if struct is None:
+                continue
+                
+            label_to_adp = {}
+            if "_atom_site_aniso_label" in block.data:
+                aniso_loop = None
+                for loop in block.loops:
+                    if any("aniso" in c.lower() for c in loop):
+                        aniso_loop = loop
+                        break
+                        
+                if aniso_loop:
+                    label_col = None
+                    val_cols = {}
+                    is_b = False
+                    for col in aniso_loop:
+                        c_low = col.lower()
+                        if "label" in c_low:
+                            label_col = col
+                        for suffix in ["11", "22", "33", "12", "13", "23"]:
+                            if c_low.endswith("u_" + suffix):
+                                val_cols[suffix] = col
+                            elif c_low.endswith("b_" + suffix):
+                                val_cols[suffix] = col
+                                is_b = True
 
-    try:
-        atoms = ase.io.read(path)
-    except Exception:
-        return None
+                    if label_col and "11" in val_cols:
+                        labels_list = block.data[label_col]
+                        num_entries = len(labels_list)
+                        
+                        for i in range(num_entries):
+                            lbl = labels_list[i]
+                            try:
+                                u_vals = {}
+                                for suffix in ["11", "22", "33", "12", "13", "23"]:
+                                    col = val_cols.get(suffix)
+                                    val = 0.0
+                                    if col and i < len(block.data[col]):
+                                        val = parse_cif_number(block.data[col][i])
+                                        if is_b:
+                                            val = val / (8.0 * math.pi * math.pi)
+                                    u_vals[suffix] = val
+                                    
+                                phonopy_order = [
+                                    u_vals.get("11", 0.0), u_vals.get("22", 0.0), u_vals.get("33", 0.0),
+                                    u_vals.get("23", 0.0), u_vals.get("13", 0.0), u_vals.get("12", 0.0)
+                                ]
+                                label_to_adp[lbl] = phonopy_order
+                            except Exception:
+                                pass
+            
+            adp_data = None
+            if label_to_adp:
+                u_cif_list = []
+                for site in struct:
+                    lbl = getattr(site, "label", "")
+                    if lbl in label_to_adp:
+                        u_cif_list.append(label_to_adp[lbl])
+                    else:
+                        u_cif_list.append([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+                if any(any(val != 0.0 for val in row) for row in u_cif_list):
+                    adp_data = np.array(u_cif_list, dtype=float)
 
-    try:
-        cell = np.asarray(atoms.get_cell(), dtype=float)
-        cell_lengths_angles = atoms.cell.cellpar()
-        positions = np.asarray(atoms.get_positions(), dtype=float)
-        symbols = atoms.get_chemical_symbols()
-    except Exception:
-        return None
+            cif_struct = _structure_from_pymatgen(struct, name or "Structure", adp_data)
+            structures.append(cif_struct)
+        except Exception:
+            pass
+            
+    return structures
 
-    if cell.shape != (3, 3) or len(positions) == 0:
-        return None
 
-    try:
-        scaled = np.asarray(atoms.get_scaled_positions(wrap=False), dtype=float)
-    except Exception:
-        scaled = np.linalg.solve(cell.T, positions.T).T
-
-    parsed_atoms = []
-    for index, (symbol, fract, cart) in enumerate(zip(symbols, scaled, positions)):
-        element = normalize_element(symbol)
-        parsed_atoms.append(CifAtom(f"{element}{index + 1}", element, fract, cart))
-
+def _structure_from_pymatgen(struct, name: str, adps: Optional[np.ndarray] = None) -> CifStructure:
+    cell_lengths = struct.lattice.lengths
+    cell_angles = struct.lattice.angles
+    lattice = struct.lattice.matrix
+    
+    atoms = []
+    for i, site in enumerate(struct):
+        label = getattr(site, "label", f"{site.species_string}{i+1}")
+        element = normalize_element(site.species_string)
+        fract = site.frac_coords
+        cart = site.coords
+        occupancy = getattr(site, "occupancy", 1.0)
+        atoms.append(CifAtom(label, element, fract, cart, occupancy))
+        
+    u_cart = None
+    if adps is not None:
+        try:
+            from pymatgen.phonon.thermal_displacements import ThermalDisplacementMatrices
+            tdm = ThermalDisplacementMatrices.from_Ucif(adps, struct)
+            u_cart = tdm.thermal_displacement_matrix_cart_matrixform
+        except Exception:
+            pass
+            
     return CifStructure(
-        name=path,
-        cell_lengths=tuple(float(value) for value in cell_lengths_angles[:3]),
-        cell_angles=tuple(float(value) for value in cell_lengths_angles[3:6]),
-        lattice=cell,
-        atoms=tuple(parsed_atoms),
+        name=name,
+        cell_lengths=(float(cell_lengths[0]), float(cell_lengths[1]), float(cell_lengths[2])),
+        cell_angles=(float(cell_angles[0]), float(cell_angles[1]), float(cell_angles[2])),
+        lattice=lattice,
+        atoms=tuple(atoms),
+        u_cart=u_cart
     )
 
 
