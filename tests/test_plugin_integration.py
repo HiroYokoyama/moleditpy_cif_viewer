@@ -225,6 +225,16 @@ def test_draw_ellipsoid_model(monkeypatch):
             self.probability_spin = MockDoubleSpinBox()
             self.h_scale_spin = MockDoubleSpinBox()
             self.show_ellipsoid_rings = MockCheckBox(True)
+            class MockColorButton:
+                def property(self, name):
+                    if name == "color_hex":
+                        return "#ff00ff"
+                    return None
+            self.color_ellipsoid_rings = MockColorButton()
+            class MockSpinBox:
+                def value(self):
+                    return 5
+            self.ellipsoid_ring_width = MockSpinBox()
             self.last_rendered_atoms = [
                 MockAtom("O1", "O", 0),
                 MockAtom("H1", "H", 1),
@@ -343,7 +353,8 @@ def test_draw_ellipsoid_model(monkeypatch):
     assert ellipsoid_mesh[1]["opacity"] == 1.0
 
     assert rings_mesh is not None
-    assert rings_mesh[1]["color"] == "black"
+    assert rings_mesh[1]["color"] == "#ff00ff"
+    assert rings_mesh[1]["line_width"] == 5
 
     assert h_mesh is not None
     assert h_mesh[1]["opacity"] == 1.0
@@ -488,12 +499,22 @@ def test_cif_viewer_widget_load_cif(qtbot, tmp_path):
     widget = CifViewerWidget(context=context)
     qtbot.addWidget(widget)
     
+    # Set repetitions to non-1 values
+    widget.repeat_a.setValue(3)
+    widget.repeat_b.setValue(2)
+    widget.repeat_c.setValue(4)
+
     widget.load_cif(str(cif_file))
     
     assert widget.structure is not None
     assert widget.structure.name == "NaCl"
     assert widget.file_label.text() == "test.cif"
     assert len(widget.all_structures) == 1
+    
+    # Verify that repetitions were reset to 1
+    assert widget.repeat_a.value() == 1
+    assert widget.repeat_b.value() == 1
+    assert widget.repeat_c.value() == 1
 
 
 def test_cif_viewer_widget_settings_and_ui_actions(qtbot, tmp_path, monkeypatch):
@@ -514,6 +535,8 @@ def test_cif_viewer_widget_settings_and_ui_actions(qtbot, tmp_path, monkeypatch)
     widget.fix_h_size.setChecked(False)
     widget.probability_spin.setValue(45.0)
     widget.h_scale_spin.setValue(25.0)
+    widget.ellipsoid_ring_width.setValue(4)
+    widget._set_button_color(widget.color_ellipsoid_rings, "#123456")
     
     widget.save_settings()
     assert settings_file.exists()
@@ -530,6 +553,8 @@ def test_cif_viewer_widget_settings_and_ui_actions(qtbot, tmp_path, monkeypatch)
     assert widget.fix_h_size.isChecked() is False
     assert widget.probability_spin.value() == 45.0
     assert widget.h_scale_spin.value() == 25.0
+    assert widget.ellipsoid_ring_width.value() == 4
+    assert widget.color_ellipsoid_rings.property("color_hex") == "#123456"
 
 
 def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
@@ -553,7 +578,8 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     widget.h_scale_spin.setValue(25.0)
     widget.axis_width.setValue(8)
     widget.axis_font_size.setValue(15)
-    widget._set_button_color(widget.color_axis_a, "#111111")
+    widget.ellipsoid_ring_width.setValue(5)
+    widget._set_button_color(widget.color_ellipsoid_rings, "#ffffff")
     
     # Trigger reset to defaults
     widget.reset_to_defaults()
@@ -572,6 +598,8 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     assert widget.axis_font.currentText() == "arial"
     assert widget.axis_font_size.value() == 20
     assert widget.color_axis_a.property("color_hex") == "#ff0000"
+    assert widget.color_ellipsoid_rings.property("color_hex") == "#000000"
+    assert widget.ellipsoid_ring_width.value() == 2
     
     # Check that settings file was updated with default values too
     assert settings_file.exists()
@@ -583,6 +611,8 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     assert data["fix_h_size"] is True
     assert data["probability"] == 50.0
     assert data["color_axis_a"] == "#ff0000"
+    assert data["color_ellipsoid_rings"] == "#000000"
+    assert data["ellipsoid_ring_width"] == 2
 
 
 

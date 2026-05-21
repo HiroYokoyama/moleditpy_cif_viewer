@@ -339,6 +339,14 @@ def initialize(context):
             show_rings = widget.show_ellipsoid_rings.isChecked()
         
         if show_rings and ellipsoid_circles_to_draw:
+            circle_color = "black"
+            if widget is not None and hasattr(widget, "color_ellipsoid_rings"):
+                circle_color = widget.color_ellipsoid_rings.property("color_hex")
+            
+            circle_width = 2
+            if widget is not None and hasattr(widget, "ellipsoid_ring_width"):
+                circle_width = widget.ellipsoid_ring_width.value()
+
             all_ring_points = []
             all_ring_lines = []
             current_pt_idx = 0
@@ -372,8 +380,8 @@ def initialize(context):
             
             plotter.add_mesh(
                 rings_mesh,
-                color="black",
-                line_width=2,
+                color=circle_color,
+                line_width=circle_width,
                 name="cif_viewer_ellipsoid_rings",
                 **mesh_props
             )

@@ -202,6 +202,16 @@ class CifViewerWidget(QWidget):
         self.show_ellipsoid_rings.toggled.connect(self.save_settings)
         ellipsoids_layout.addRow(self.show_ellipsoid_rings)
 
+        self.color_ellipsoid_rings = self._create_color_button("#000000")
+        ellipsoids_layout.addRow("Circle color", self.color_ellipsoid_rings)
+
+        self.ellipsoid_ring_width = QSpinBox()
+        self.ellipsoid_ring_width.setRange(1, 10)
+        self.ellipsoid_ring_width.setValue(2)
+        self.ellipsoid_ring_width.valueChanged.connect(self.render)
+        self.ellipsoid_ring_width.valueChanged.connect(self.save_settings)
+        ellipsoids_layout.addRow("Circle width", self.ellipsoid_ring_width)
+
         self.fix_h_size = QCheckBox("Fix hydrogen atom size")
         self.fix_h_size.setChecked(True)
         self.fix_h_size.toggled.connect(self.render)
@@ -326,6 +336,7 @@ class CifViewerWidget(QWidget):
         self.axis_width.blockSignals(True)
         self.axis_font.blockSignals(True)
         self.axis_font_size.blockSignals(True)
+        self.ellipsoid_ring_width.blockSignals(True)
 
         try:
             self.show_bonds.setChecked(True)
@@ -338,6 +349,7 @@ class CifViewerWidget(QWidget):
             self.probability_spin.setValue(50.0)
             self.h_scale_spin.setValue(20.0)
             self.axis_width.setValue(5)
+            self.ellipsoid_ring_width.setValue(2)
             
             idx = self.axis_font.findText("arial")
             if idx >= 0:
@@ -349,6 +361,7 @@ class CifViewerWidget(QWidget):
             self._set_button_color(self.color_axis_c, "#0000ff")
             self._set_button_color(self.color_cell_edges, "#ffffff")
             self._set_button_color(self.color_origin, "#000000")
+            self._set_button_color(self.color_ellipsoid_rings, "#000000")
         finally:
             self.show_bonds.blockSignals(False)
             self.show_hydrogens.blockSignals(False)
@@ -362,6 +375,7 @@ class CifViewerWidget(QWidget):
             self.axis_width.blockSignals(False)
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
+            self.ellipsoid_ring_width.blockSignals(False)
             
         self.save_settings()
         self.render()
@@ -415,6 +429,7 @@ class CifViewerWidget(QWidget):
             self.axis_width.blockSignals(True)
             self.axis_font.blockSignals(True)
             self.axis_font_size.blockSignals(True)
+            self.ellipsoid_ring_width.blockSignals(True)
             
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
@@ -439,9 +454,10 @@ class CifViewerWidget(QWidget):
                     match = re.search(r"([\d\.]+)", val_str)
                     if match:
                         val = float(match.group(1))
-                        # Backwards compatibility: if value is small (like 1.54), it was a scale factor. Default to 50%.
+                        # Backwards compatibility: if value is small (like 1.54),
+                        # it was a scale factor. Default to 50%.
                         if val <= 10.0:
-                             val = 50.0
+                            val = 50.0
                         self.probability_spin.setValue(val)
                 except Exception:
                     pass
@@ -463,6 +479,10 @@ class CifViewerWidget(QWidget):
                 self._set_button_color(self.color_cell_edges, data["color_cell_edges"])
             if "color_origin" in data:
                 self._set_button_color(self.color_origin, data["color_origin"])
+            if "color_ellipsoid_rings" in data:
+                self._set_button_color(self.color_ellipsoid_rings, data["color_ellipsoid_rings"])
+            if "ellipsoid_ring_width" in data:
+                self.ellipsoid_ring_width.setValue(int(data["ellipsoid_ring_width"]))
         except Exception:
             pass
         finally:
@@ -478,6 +498,7 @@ class CifViewerWidget(QWidget):
             self.axis_width.blockSignals(False)
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
+            self.ellipsoid_ring_width.blockSignals(False)
 
     def save_settings(self, *args):
         path = self._settings_path()
@@ -500,6 +521,8 @@ class CifViewerWidget(QWidget):
             "color_axis_c": self.color_axis_c.property("color_hex"),
             "color_cell_edges": self.color_cell_edges.property("color_hex"),
             "color_origin": self.color_origin.property("color_hex"),
+            "color_ellipsoid_rings": self.color_ellipsoid_rings.property("color_hex"),
+            "ellipsoid_ring_width": self.ellipsoid_ring_width.value(),
         }
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -508,6 +531,11 @@ class CifViewerWidget(QWidget):
             pass
 
     def load_cif(self, path: str):
+        for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
+            spin.blockSignals(True)
+            spin.setValue(1)
+            spin.blockSignals(False)
+
         try:
             self.all_structures = parse_cif_file_pymatgen(path)
         except Exception:
