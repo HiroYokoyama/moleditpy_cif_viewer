@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -44,6 +45,7 @@ class CifViewerWidget(QWidget):
         self.structure: Optional[CifStructure] = None
         self.current_path: Optional[str] = None
         self.overlay_actor_names = []
+        self._reset_camera_on_next_render = True
         self._build_ui()
         self.load_settings()
 
@@ -83,30 +85,45 @@ class CifViewerWidget(QWidget):
         form.addRow(reset_supercell_button)
         layout.addWidget(supercell_group)
 
+        # Options Form
         options = QWidget()
-        options_row = QHBoxLayout(options)
-        options_row.setContentsMargins(0, 0, 0, 0)
-        self.show_bonds = QCheckBox("Bonds")
+        options_layout = QFormLayout(options)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.show_bonds = QCheckBox("Show bonds")
         self.show_bonds.setChecked(True)
-        self.keep_connected = QCheckBox("Keep connected")
+        self.keep_connected = QCheckBox("Keep molecules connected")
         self.keep_connected.setChecked(True)
-        self.show_cell = QCheckBox("Cell")
+        self.show_cell = QCheckBox("Show unit cell")
         self.show_cell.setChecked(True)
         self.show_axes = QCheckBox("a/b/c axes")
         self.show_axes.setChecked(True)
-        self.show_ellipsoids = QCheckBox("Ellipsoids")
-        self.show_ellipsoids.setChecked(True)
-        for checkbox in (self.show_bonds, self.keep_connected, self.show_cell, self.show_axes, self.show_ellipsoids):
+        self.show_ellipsoid_rings = QCheckBox("Show circles")
+        self.show_ellipsoid_rings.setChecked(True)
+        
+        for checkbox in (self.show_bonds, self.keep_connected, self.show_cell, self.show_axes, self.show_ellipsoid_rings):
             checkbox.toggled.connect(self.render)
             checkbox.toggled.connect(self.save_settings)
-            options_row.addWidget(checkbox)
+            options_layout.addRow(checkbox)
             
-        self.probability_combo = QComboBox()
-        self.probability_combo.addItems(["50% (1.54)", "90% (2.50)", "95% (2.79)", "99% (3.40)"])
-        self.probability_combo.setCurrentText("50% (1.54)")
-        self.probability_combo.currentTextChanged.connect(self.render)
-        self.probability_combo.currentTextChanged.connect(self.save_settings)
-        options_row.addWidget(self.probability_combo)
+        self.probability_spin = QDoubleSpinBox()
+        self.probability_spin.setRange(1.0, 99.9)
+        self.probability_spin.setSingleStep(1.0)
+        self.probability_spin.setValue(50.0)
+        self.probability_spin.setDecimals(1)
+        self.probability_spin.editingFinished.connect(self.render)
+        self.probability_spin.editingFinished.connect(self.save_settings)
+        options_layout.addRow("Probability (%):", self.probability_spin)
+
+        self.h_scale_spin = QDoubleSpinBox()
+        self.h_scale_spin.setRange(1.0, 100.0)
+        self.h_scale_spin.setSingleStep(5.0)
+        self.h_scale_spin.setValue(30.0)
+        self.h_scale_spin.setDecimals(1)
+        self.h_scale_spin.editingFinished.connect(self.render)
+        self.h_scale_spin.editingFinished.connect(self.save_settings)
+        options_layout.addRow("H Scale (% VDW):", self.h_scale_spin)
+
         layout.addWidget(options)
 
         axis_group = QGroupBox("Cell Axis")
@@ -177,6 +194,7 @@ class CifViewerWidget(QWidget):
         row = selected_ranges[0].topRow()
         if 0 <= row < len(self.all_structures):
             self.structure = self.all_structures[row]
+            self._reset_camera_on_next_render = True
             self.render()
 
     def _settings_path(self):
@@ -194,8 +212,9 @@ class CifViewerWidget(QWidget):
             self.keep_connected.blockSignals(True)
             self.show_cell.blockSignals(True)
             self.show_axes.blockSignals(True)
-            self.show_ellipsoids.blockSignals(True)
-            self.probability_combo.blockSignals(True)
+            self.show_ellipsoid_rings.blockSignals(True)
+            self.probability_spin.blockSignals(True)
+            self.h_scale_spin.blockSignals(True)
             self.axis_width.blockSignals(True)
             self.axis_font.blockSignals(True)
             self.axis_font_size.blockSignals(True)
@@ -208,12 +227,23 @@ class CifViewerWidget(QWidget):
                 self.show_cell.setChecked(bool(data["show_cell"]))
             if "show_axes" in data:
                 self.show_axes.setChecked(bool(data["show_axes"]))
-            if "show_ellipsoids" in data:
-                self.show_ellipsoids.setChecked(bool(data["show_ellipsoids"]))
+            if "h_scale" in data:
+                self.h_scale_spin.setValue(float(data["h_scale"]))
+            if "show_ellipsoid_rings" in data:
+                self.show_ellipsoid_rings.setChecked(bool(data["show_ellipsoid_rings"]))
             if "probability" in data:
-                idx = self.probability_combo.findText(str(data["probability"]))
-                if idx >= 0:
-                    self.probability_combo.setCurrentIndex(idx)
+                try:
+                    val_str = str(data["probability"])
+                    import re
+                    match = re.search(r"([\d\.]+)", val_str)
+                    if match:
+                        val = float(match.group(1))
+                        # Backwards compatibility: if value is small (like 1.54), it was a scale factor. Default to 50%.
+                        if val <= 10.0:
+                            val = 50.0
+                        self.probability_spin.setValue(val)
+                except Exception:
+                    pass
             if "axis_width" in data:
                 self.axis_width.setValue(int(data["axis_width"]))
             if "axis_font" in data:
@@ -229,8 +259,9 @@ class CifViewerWidget(QWidget):
             self.keep_connected.blockSignals(False)
             self.show_cell.blockSignals(False)
             self.show_axes.blockSignals(False)
-            self.show_ellipsoids.blockSignals(False)
-            self.probability_combo.blockSignals(False)
+            self.show_ellipsoid_rings.blockSignals(False)
+            self.probability_spin.blockSignals(False)
+            self.h_scale_spin.blockSignals(False)
             self.axis_width.blockSignals(False)
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
@@ -243,8 +274,9 @@ class CifViewerWidget(QWidget):
             "keep_connected": self.keep_connected.isChecked(),
             "show_cell": self.show_cell.isChecked(),
             "show_axes": self.show_axes.isChecked(),
-            "show_ellipsoids": self.show_ellipsoids.isChecked(),
-            "probability": self.probability_combo.currentText(),
+            "show_ellipsoid_rings": self.show_ellipsoid_rings.isChecked(),
+            "probability": self.probability_spin.value(),
+            "h_scale": self.h_scale_spin.value(),
             "axis_width": self.axis_width.value(),
             "axis_font": self.axis_font.currentText(),
             "axis_font_size": self.axis_font_size.value(),
@@ -269,6 +301,7 @@ class CifViewerWidget(QWidget):
             QMessageBox.critical(self, "CIF Viewer", "No valid structures found in CIF file.")
             return
 
+        self._reset_camera_on_next_render = True
         self.current_path = path
         self.file_label.setText(os.path.basename(path))
         
@@ -328,6 +361,7 @@ class CifViewerWidget(QWidget):
             keep_connected=self.keep_connected.isChecked(),
         )
         mol_bonds = bonds if self.show_bonds.isChecked() else []
+        self.last_rendered_atoms = atoms
         try:
             mol = render_atoms_to_rdkit_mol(atoms, mol_bonds)
         except Exception as exc:
@@ -342,11 +376,10 @@ class CifViewerWidget(QWidget):
         if self.show_cell.isChecked():
             self._draw_cell_overlay(plotter, repeats)
 
-        if self.show_ellipsoids.isChecked() and self.structure.u_cart is not None:
-            self._draw_ellipsoid_overlay(plotter, atoms)
-
         try:
-            plotter.reset_camera()
+            if getattr(self, "_reset_camera_on_next_render", True):
+                plotter.reset_camera()
+                self._reset_camera_on_next_render = False
             if hasattr(plotter, "camera"):
                 plotter.camera.focal_point = self._cell_center(repeats)
             plotter.render()
@@ -400,80 +433,29 @@ class CifViewerWidget(QWidget):
                     bold=True,
                     always_visible=True,
                     shape=None,
+                    shape_opacity=0.0,
                     name=label_name,
                 )
                 self.overlay_actor_names.append(label_name)
 
-    def _draw_ellipsoid_overlay(self, plotter, atoms):
-        import pyvista as pv
-        import re
-        
-        ELEMENT_COLORS = {
-            "H": "#FFFFFF", "He": "#D9FFFF", "Li": "#CC80FF", "Be": "#C2FF00",
-            "B": "#FFB5B5", "C": "#909090", "N": "#3050F8", "O": "#FF0D0D",
-            "F": "#90E050", "Ne": "#B3E3F5", "Na": "#AB5CF2", "Mg": "#8AFF00",
-            "Al": "#BFA6A6", "Si": "#F0C8A0", "P": "#FF8000", "S": "#E6C800",
-            "Cl": "#1FF01F", "Ar": "#80D1E3", "K": "#8F40D4", "Ca": "#3DFF00",
-            "Fe": "#E06633", "Cu": "#C88033", "Zn": "#7D80B0",
-        }
-        
-        prob_text = self.probability_combo.currentText()
-        match = re.search(r"\(([\d\.]+)\)", prob_text)
-        scale_factor = float(match.group(1)) if match else 1.54
+        if self.show_axes.isChecked():
+            origin_name = "cif_viewer_cell_origin_label"
+            plotter.add_point_labels(
+                [np.array([0.0, 0.0, 0.0])],
+                ["O"],
+                point_size=0,
+                font_size=self.axis_font_size.value(),
+                text_color="black",
+                font_family=self.axis_font.currentText(),
+                bold=True,
+                always_visible=True,
+                shape=None,
+                shape_opacity=0.0,
+                name=origin_name,
+            )
+            self.overlay_actor_names.append(origin_name)
 
-        for index, atom in enumerate(atoms):
-            base_idx = atom.base_index
-            if base_idx >= len(self.structure.u_cart):
-                continue
-            cov = self.structure.u_cart[base_idx]
-            if cov is None or np.allclose(cov, 0.0):
-                continue
-            
-            try:
-                eigenvalues, eigenvectors = np.linalg.eig(cov)
-                eigenvalues = np.maximum(eigenvalues, 1e-5)
-                radii = np.sqrt(eigenvalues) * scale_factor
-                
-                ellipsoid = pv.ParametricEllipsoid(
-                    xradius=radii[0],
-                    yradius=radii[1],
-                    zradius=radii[2],
-                    u_res=20,
-                    v_res=20
-                )
-                
-                rotation_matrix = np.eye(4)
-                rotation_matrix[:3, :3] = eigenvectors
-                ellipsoid.transform(rotation_matrix, inplace=True)
-                ellipsoid.translate(atom.position, inplace=True)
-                
-                color = ELEMENT_COLORS.get(atom.element, "#00FFFF")
-                name = f"cif_viewer_ellipsoid_{index}"
-                
-                plotter.add_mesh(
-                    ellipsoid,
-                    color=color,
-                    opacity=1.0,
-                    name=name,
-                    style='surface'
-                )
-                self.overlay_actor_names.append(name)
-                
-                for i in range(3):
-                    vec = eigenvectors[:, i] * radii[i]
-                    start_pt = atom.position - vec
-                    end_pt = atom.position + vec
-                    line_name = f"cif_viewer_ellipsoid_axis_{index}_{i}"
-                    plotter.add_lines(
-                        np.array([start_pt, end_pt]),
-                        color="black",
-                        width=2,
-                        name=line_name
-                    )
-                    self.overlay_actor_names.append(line_name)
-                    
-            except Exception as exc:
-                print(f"Error drawing ellipsoid for {atom.label}: {exc}")
+
 
     def _cell_center(self, repeats):
         lattice = np.asarray(self.structure.lattice, dtype=float)
