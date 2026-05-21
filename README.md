@@ -2,7 +2,7 @@
 
 A crystal structure viewer plugin for [MoleditPy](https://github.com/HiroYokoyama/python_molecular_editor). 
 
-This plugin allows researchers and developers to load CIF files, generate supercells, customize rendering styles, view along crystallographic axes, and display anisotropic displacement parameters (Thermal Ellipsoids) with extensive styling options—all while leaving the host application's active session and undo history completely unmodified.
+This plugin allows researchers and developers to load CIF files, generate supercells, customize rendering styles, view along crystallographic axes, and display anisotropic displacement parameters (Thermal Ellipsoids) with extensive styling options.
 
 ![](img/ptfe.png)
 ---
@@ -21,7 +21,6 @@ This plugin allows researchers and developers to load CIF files, generate superc
 
 ## Key Features
 
-*   **Zero-Footprint Integration**: Keeps the host application's active molecule and undo stack entirely untouched. The CIF structure is visualized as a temporary overlay on top of the 3D scene.
 *   **High Performance Rendering**: Optimized drawing routines that merge points, ellipsoids, and line segments into single PyVista/VTK actors, eliminating $O(N)$ draw call bottlenecks.
 *   **Crystallographic Camera Alignment**: Single-click camera reorientation along the fractional directions ($a$, $b$, $c$, $-a$, $-b$, $-c$) with mathematically aligned orientation up vectors.
 *   **Thermal Ellipsoid ADP Visualization**: Support for rendering anisotropic displacement parameters (ADPs) at arbitrary probability levels (e.g. 50%).
