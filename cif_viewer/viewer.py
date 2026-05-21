@@ -349,7 +349,7 @@ class CifViewerWidget(QWidget):
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(100, self.render)
 
-    def clear_view(self):
+    def clear_view(self, redraw=True):
         plotter = self._plotter()
         if plotter is None:
             return
@@ -359,7 +359,27 @@ class CifViewerWidget(QWidget):
             except Exception:
                 pass
         self.overlay_actor_names.clear()
+        if redraw:
+            try:
+                plotter.render()
+            except Exception:
+                pass
+
+    def render_overlays_only(self):
+        if self.structure is None:
+            return
+        plotter = self._plotter()
+        if plotter is None:
+            return
+
+        self.clear_view(redraw=False)
+        repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
+        if self.show_cell.isChecked():
+            self._draw_cell_overlay(plotter, repeats)
+
         try:
+            if hasattr(plotter, "camera"):
+                plotter.camera.focal_point = self._cell_center(repeats)
             plotter.render()
         except Exception:
             pass
@@ -389,22 +409,32 @@ class CifViewerWidget(QWidget):
             return
 
         self._draw_with_moleditpy(mol)
-        plotter = self._plotter()
-        if plotter is None:
-            return
 
-        if self.show_cell.isChecked():
-            self._draw_cell_overlay(plotter, repeats)
+        def draw_overlays_and_render():
+            plotter = self._plotter()
+            if plotter is None:
+                return
+
+            self.clear_view()
+
+            if self.show_cell.isChecked():
+                self._draw_cell_overlay(plotter, repeats)
+
+            try:
+                if getattr(self, "_reset_camera_on_next_render", True):
+                    plotter.reset_camera()
+                    self._reset_camera_on_next_render = False
+                if hasattr(plotter, "camera"):
+                    plotter.camera.focal_point = self._cell_center(repeats)
+                plotter.render()
+            except Exception:
+                pass
 
         try:
-            if getattr(self, "_reset_camera_on_next_render", True):
-                plotter.reset_camera()
-                self._reset_camera_on_next_render = False
-            if hasattr(plotter, "camera"):
-                plotter.camera.focal_point = self._cell_center(repeats)
-            plotter.render()
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(100, draw_overlays_and_render)
         except Exception:
-            pass
+            draw_overlays_and_render()
 
         self.summary_label.setText(
             f"{len(self.structure.atoms)} completed unit-cell atoms, "

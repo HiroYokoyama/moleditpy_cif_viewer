@@ -380,3 +380,60 @@ def test_menu_action_toggles_dock_widget(monkeypatch):
     # Third click: Dock exists and is hidden -> should show it
     action()
     assert dock._visible is True
+
+
+def test_draw_molecule_3d_hook_and_overlays(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    
+    # Setup mock viewer widget that registers when render_overlays_only is called
+    class MockViewerWidget:
+        def __init__(self, dock, context):
+            self.dock = dock
+            self.context = context
+            self.structure = "dummy_structure"
+            self.overlays_rendered = False
+
+        def render_overlays_only(self):
+            self.overlays_rendered = True
+            
+    fake_viewer = types.ModuleType("cif_viewer.viewer")
+    fake_viewer.CifViewerWidget = MockViewerWidget
+    monkeypatch.setitem(sys.modules, "cif_viewer.viewer", fake_viewer)
+    
+    context = StubContext()
+    
+    # Add view_3d_manager to the StubMainWindow
+    class FakeView3DManager:
+        def __init__(self):
+            self.drawn_molecule = None
+        def draw_molecule_3d(self, mol):
+            self.drawn_molecule = mol
+            
+    vm = FakeView3DManager()
+    context.main_window.view_3d_manager = vm
+    
+    # Initialize the plugin
+    initialize(context)
+    
+    # Open the panel
+    show_panel_action = context.menu_actions[0][1]
+    show_panel_action()
+    
+    # Verify the hook is installed on view_3d_manager.draw_molecule_3d
+    assert vm._cif_viewer_hooked is True
+    assert vm.draw_molecule_3d != FakeView3DManager.draw_molecule_3d
+    
+    # Get the dock and mock its visibility to True
+    dock = context.get_window("cif_viewer_panel")
+    dock._visible = True
+    dock.isVisible = lambda: dock._visible
+    
+    # Call the hooked draw_molecule_3d
+    vm.draw_molecule_3d("dummy_mol")
+    
+    # Verify that the original draw was called
+    assert vm.drawn_molecule == "dummy_mol"
+    
+    # Verify that render_overlays_only was triggered
+    widget = dock.widget()
+    assert widget.overlays_rendered is True

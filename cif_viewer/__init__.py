@@ -20,6 +20,27 @@ def initialize(context):
         from .viewer import CifViewerWidget
 
         main_window = context.get_main_window()
+        if main_window is not None and hasattr(main_window, "view_3d_manager"):
+            vm = main_window.view_3d_manager
+            if not getattr(vm, "_cif_viewer_hooked", False):
+                vm._cif_viewer_hooked = True
+                orig_draw = vm.draw_molecule_3d
+                import types
+
+                def hooked_draw(self_vm, mol, *args, **kwargs):
+                    orig_draw(mol, *args, **kwargs)
+                    dock_widget = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
+                    if dock_widget is not None and dock_widget.widget() is not None:
+                        w = dock_widget.widget()
+                        if getattr(w, "structure", None) is not None and dock_widget.isVisible():
+                            try:
+                                from PyQt6.QtCore import QTimer
+                                QTimer.singleShot(150, w.render_overlays_only)
+                            except Exception:
+                                w.render_overlays_only()
+
+                vm.draw_molecule_3d = types.MethodType(hooked_draw, vm)
+
         dock = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
         if dock is None:
             dock = QDockWidget("CIF Viewer", main_window)
