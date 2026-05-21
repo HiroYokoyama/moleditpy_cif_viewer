@@ -98,14 +98,24 @@ class CifViewerWidget(QWidget):
         self.show_cell.setChecked(True)
         self.show_axes = QCheckBox("a/b/c axes")
         self.show_axes.setChecked(True)
-        self.show_ellipsoid_rings = QCheckBox("Show circles")
-        self.show_ellipsoid_rings.setChecked(True)
         
-        for checkbox in (self.show_bonds, self.keep_connected, self.show_cell, self.show_axes, self.show_ellipsoid_rings):
+        for checkbox in (self.show_bonds, self.keep_connected, self.show_cell, self.show_axes):
             checkbox.toggled.connect(self.render)
             checkbox.toggled.connect(self.save_settings)
             options_layout.addRow(checkbox)
             
+        layout.addWidget(options)
+
+        # Thermal Ellipsoids Settings Group
+        ellipsoid_group = QGroupBox("Thermal Ellipsoids")
+        ellipsoid_layout = QFormLayout(ellipsoid_group)
+
+        self.show_ellipsoid_rings = QCheckBox("Show circles")
+        self.show_ellipsoid_rings.setChecked(True)
+        self.show_ellipsoid_rings.toggled.connect(self.render)
+        self.show_ellipsoid_rings.toggled.connect(self.save_settings)
+        ellipsoid_layout.addRow(self.show_ellipsoid_rings)
+
         self.probability_spin = QDoubleSpinBox()
         self.probability_spin.setRange(1.0, 99.9)
         self.probability_spin.setSingleStep(1.0)
@@ -113,7 +123,7 @@ class CifViewerWidget(QWidget):
         self.probability_spin.setDecimals(1)
         self.probability_spin.editingFinished.connect(self.render)
         self.probability_spin.editingFinished.connect(self.save_settings)
-        options_layout.addRow("Probability (%):", self.probability_spin)
+        ellipsoid_layout.addRow("Probability (%):", self.probability_spin)
 
         self.h_scale_spin = QDoubleSpinBox()
         self.h_scale_spin.setRange(1.0, 100.0)
@@ -122,9 +132,13 @@ class CifViewerWidget(QWidget):
         self.h_scale_spin.setDecimals(1)
         self.h_scale_spin.editingFinished.connect(self.render)
         self.h_scale_spin.editingFinished.connect(self.save_settings)
-        options_layout.addRow("H Scale (% VDW):", self.h_scale_spin)
+        ellipsoid_layout.addRow("H Scale (% VDW):", self.h_scale_spin)
 
-        layout.addWidget(options)
+        self.switch_style_btn = QPushButton("Switch to Ellipsoids Style")
+        self.switch_style_btn.clicked.connect(self._switch_to_ellipsoids)
+        ellipsoid_layout.addRow(self.switch_style_btn)
+
+        layout.addWidget(ellipsoid_group)
 
         axis_group = QGroupBox("Cell Axis")
         axis_form = QFormLayout(axis_group)
@@ -176,6 +190,12 @@ class CifViewerWidget(QWidget):
             spin.setValue(1)
             spin.blockSignals(False)
         self.render()
+
+    def _switch_to_ellipsoids(self):
+        if self.context is not None:
+            mw = self.context.get_main_window()
+            if mw is not None and hasattr(mw, "view_3d_manager"):
+                mw.view_3d_manager.set_3d_style("Thermal Ellipsoids")
 
     def _choose_file(self):
         path, _ = QFileDialog.getOpenFileName(
