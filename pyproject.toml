@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-cif-viewer"
-version = "0.1.0"
-description = "Visualization-only CIF crystal structure viewer plugin for MoleditPy"
+version = "0.2.0"
+description = "CIF crystal structure viewer plugin for MoleditPy"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
