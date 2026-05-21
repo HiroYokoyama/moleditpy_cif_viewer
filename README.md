@@ -130,7 +130,7 @@ The custom drawing callback in `__init__.py` checks the active molecule for the 
 ## Installation
 
 ### Standard Installation
-Place the `cif_viewer` folder into your local MoleditPy plugins directory (typically under `~/.moleditpy/plugins/`).
+Download from [Plugin Explorer](https://hiroyokoyama.github.io/moleditpy-plugins/explorer/?q=CIF+Viewer) Place the `cif_viewer` folder into your local MoleditPy plugins directory (typically under `~/.moleditpy/plugins/`).
 
 ### Developer Installation
 Install the plugin in editable mode to link the local development tree into your active python environment:
