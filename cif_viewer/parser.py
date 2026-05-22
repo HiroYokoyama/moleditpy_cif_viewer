@@ -19,6 +19,16 @@ class CifAtom:
     fract: np.ndarray
     cart: np.ndarray
     occupancy: Optional[float] = None
+    disorder_group: Optional[str] = None
+    disorder_assembly: Optional[str] = None
+
+    @property
+    def disorder_key(self) -> Optional[str]:
+        if self.disorder_group is None:
+            return None
+        if self.disorder_assembly is not None:
+            return f"{self.disorder_assembly}_{self.disorder_group}"
+        return self.disorder_group
 
 
 @dataclass(frozen=True)
@@ -29,6 +39,13 @@ class CifStructure:
     lattice: np.ndarray
     atoms: Tuple[CifAtom, ...]
     u_cart: Optional[np.ndarray] = None
+    space_group: Optional[str] = None
+    crystal_system: Optional[str] = None
+    formula: Optional[str] = None
+    r1: Optional[str] = None
+    wr2: Optional[str] = None
+    goof: Optional[str] = None
+    is_asymmetric_unit_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,11 +55,33 @@ class RenderAtom:
     base_index: int
     image: Tuple[int, int, int]
     position: np.ndarray
+    disorder_group: Optional[str] = None
+    disorder_assembly: Optional[str] = None
+
+    @property
+    def disorder_key(self) -> Optional[str]:
+        if self.disorder_group is None:
+            return None
+        if self.disorder_assembly is not None:
+            return f"{self.disorder_assembly}_{self.disorder_group}"
+        return self.disorder_group
 
 
 def parse_cif_file(path: str) -> CifStructure:
     with open(path, "r", encoding="utf-8") as handle:
         return parse_cif(handle.read(), name=path)
+
+
+def _get_first_tag_value(block_data, keys: List[str]) -> Optional[str]:
+    for key in keys:
+        if key in block_data:
+            vals = block_data[key]
+            if vals is not None:
+                val = vals[0] if isinstance(vals, (list, tuple)) else vals
+                cleaned = str(val).strip().strip("'\"")
+                if cleaned not in {".", "?", ""}:
+                    return cleaned
+    return None
 
 
 def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
@@ -185,7 +224,99 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 if u_cart_list and any(not np.allclose(m, 0.0) for m in u_cart_list):
                     u_cart_data = np.array(u_cart_list, dtype=float)
 
-            cif_struct = _structure_from_pymatgen(struct, name or "Structure", u_cart_data)
+            # Build label_to_disorder map
+            label_to_disorder = {}
+            label_key = None
+            group_key = None
+            assembly_key = None
+            for k in block.data.keys():
+                k_norm = k.lower().lstrip("_")
+                if k_norm == "atom_site_label":
+                    label_key = k
+                elif k_norm == "atom_site_disorder_group":
+                    group_key = k
+                elif k_norm == "atom_site_disorder_assembly":
+                    assembly_key = k
+
+            if label_key is not None:
+                labels = block.data[label_key]
+                groups = block.data[group_key] if group_key is not None else []
+                assemblies = block.data[assembly_key] if assembly_key is not None else []
+                for idx_lbl, lbl in enumerate(labels):
+                    try:
+                        clean_lbl = str(lbl).strip().strip("'\"")
+                        g = str(groups[idx_lbl]).strip().strip("'\"") if idx_lbl < len(groups) else None
+                        a = str(assemblies[idx_lbl]).strip().strip("'\"") if idx_lbl < len(assemblies) else None
+                        if g in {".", "?", ""}:
+                            g = None
+                        if a in {".", "?", ""}:
+                            a = None
+                        label_to_disorder[clean_lbl] = (g, a)
+                    except Exception:
+                        pass
+
+            # Extract cell metadata and refinement factors
+            space_group = _get_first_tag_value(block.data, [
+                "_space_group_name_h-m_alt",
+                "_symmetry_space_group_name_h-m",
+                "_space_group.symmetry_space_group_name_h-m"
+            ])
+            if not space_group:
+                try:
+                    space_group = struct.get_space_group_info()[0]
+                except Exception:
+                    pass
+            
+            crystal_system = _get_first_tag_value(block.data, [
+                "_space_group_crystal_system",
+                "_symmetry_cell_setting"
+            ])
+            if not crystal_system:
+                try:
+                    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                    sga = SpacegroupAnalyzer(struct)
+                    crystal_system = sga.get_crystal_system()
+                except Exception:
+                    pass
+            
+            formula = _get_first_tag_value(block.data, [
+                "_chemical_formula_sum",
+                "_chemical_formula_structural",
+                "_chemical_formula_moiety"
+            ])
+            if not formula:
+                try:
+                    formula = struct.formula
+                except Exception:
+                    pass
+
+            r1 = _get_first_tag_value(block.data, [
+                "_refine_ls_r_factor_gt",
+                "_refine_ls_r_factor_obs",
+                "_refine_ls_r_factor_all"
+            ])
+            wr2 = _get_first_tag_value(block.data, [
+                "_refine_ls_wr_factor_ref",
+                "_refine_ls_wr_factor_gt",
+                "_refine_ls_wr_factor_all"
+            ])
+            goof = _get_first_tag_value(block.data, [
+                "_refine_ls_goodness_of_fit_ref",
+                "_refine_ls_goodness_of_fit_all"
+            ])
+
+            cif_struct = _structure_from_pymatgen(
+                struct,
+                name or "Structure",
+                u_cart_data,
+                label_to_disorder=label_to_disorder,
+                space_group=space_group,
+                crystal_system=crystal_system,
+                formula=formula,
+                r1=r1,
+                wr2=wr2,
+                goof=goof
+            )
             structures.append(cif_struct)
         except Exception:
             pass
@@ -193,11 +324,25 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
     return structures
 
 
-def _structure_from_pymatgen(struct, name: str, u_cart: Optional[np.ndarray] = None) -> CifStructure:
+def _structure_from_pymatgen(
+    struct,
+    name: str,
+    u_cart: Optional[np.ndarray] = None,
+    label_to_disorder: Optional[Dict[str, Tuple[Optional[str], Optional[str]]]] = None,
+    space_group: Optional[str] = None,
+    crystal_system: Optional[str] = None,
+    formula: Optional[str] = None,
+    r1: Optional[str] = None,
+    wr2: Optional[str] = None,
+    goof: Optional[str] = None,
+) -> CifStructure:
     cell_lengths = struct.lattice.lengths
     cell_angles = struct.lattice.angles
     lattice = struct.lattice.matrix
     
+    if label_to_disorder is None:
+        label_to_disorder = {}
+        
     atoms = []
     for i, site in enumerate(struct):
         label = getattr(site, "label", f"{site.species_string}{i+1}")
@@ -205,7 +350,19 @@ def _structure_from_pymatgen(struct, name: str, u_cart: Optional[np.ndarray] = N
         fract = site.frac_coords
         cart = site.coords
         occupancy = getattr(site, "occupancy", 1.0)
-        atoms.append(CifAtom(label, element, fract, cart, occupancy))
+        
+        clean_lbl = str(label).strip().strip("'\"")
+        g, a = label_to_disorder.get(clean_lbl, (None, None))
+        
+        atoms.append(CifAtom(
+            label=label,
+            element=element,
+            fract=fract,
+            cart=cart,
+            occupancy=occupancy,
+            disorder_group=g,
+            disorder_assembly=a
+        ))
         
     return CifStructure(
         name=name,
@@ -213,8 +370,16 @@ def _structure_from_pymatgen(struct, name: str, u_cart: Optional[np.ndarray] = N
         cell_angles=(float(cell_angles[0]), float(cell_angles[1]), float(cell_angles[2])),
         lattice=lattice,
         atoms=tuple(atoms),
-        u_cart=u_cart
+        u_cart=u_cart,
+        space_group=space_group,
+        crystal_system=crystal_system,
+        formula=formula,
+        r1=r1,
+        wr2=wr2,
+        goof=goof,
+        is_asymmetric_unit_only=False
     )
+
 
 
 def parse_cif(text: str, name: str = "CIF") -> CifStructure:
@@ -238,7 +403,53 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
     if not atoms:
         raise ValueError("CIF does not contain readable atom positions.")
 
-    return CifStructure(structure_name, lengths, angles, lattice, tuple(atoms))
+    def _get_tag_value_dict(tags_dict, keys: List[str]) -> Optional[str]:
+        for key in keys:
+            if key in tags_dict:
+                cleaned = str(tags_dict[key]).strip().strip("'\"")
+                if cleaned not in {".", "?", ""}:
+                    return cleaned
+        return None
+
+    space_group = _get_tag_value_dict(tags, [
+        "_space_group_name_h-m_alt",
+        "_symmetry_space_group_name_h-m",
+        "_space_group.symmetry_space_group_name_h-m"
+    ])
+    crystal_system = _get_tag_value_dict(tags, [
+        "_space_group_crystal_system",
+        "_symmetry_cell_setting"
+    ])
+    formula = _get_tag_value_dict(tags, [
+        "_chemical_formula_sum",
+        "_chemical_formula_structural",
+        "_chemical_formula_moiety"
+    ])
+    r1 = _get_tag_value_dict(tags, [
+        "_refine_ls_r_factor_gt",
+        "_refine_ls_r_factor_obs",
+        "_refine_ls_r_factor_all"
+    ])
+    wr2 = _get_tag_value_dict(tags, [
+        "_refine_ls_wr_factor_ref",
+        "_refine_ls_wr_factor_gt",
+        "_refine_ls_wr_factor_all"
+    ])
+    goof = _get_tag_value_dict(tags, [
+        "_refine_ls_goodness_of_fit_ref",
+        "_refine_ls_goodness_of_fit_all"
+    ])
+
+    return CifStructure(
+        structure_name, lengths, angles, lattice, tuple(atoms),
+        space_group=space_group,
+        crystal_system=crystal_system,
+        formula=formula,
+        r1=r1,
+        wr2=wr2,
+        goof=goof,
+        is_asymmetric_unit_only=True
+    )
 
 
 def cell_vectors(
@@ -291,6 +502,8 @@ def expand_supercell(
                             base_index=base_index,
                             image=(ia, ib, ic),
                             position=atom.cart + cart_offset,
+                            disorder_group=atom.disorder_group,
+                            disorder_assembly=atom.disorder_assembly,
                         )
                     )
 
@@ -322,7 +535,11 @@ def unwrap_connected_atoms(structure: CifStructure) -> List[CifAtom]:
         offset = image_offsets.get(atom_index, np.zeros(3, dtype=int))
         fract = np.asarray(atom.fract, dtype=float) + offset
         cart = fractional_to_cartesian(fract, structure.lattice)
-        unwrapped.append(CifAtom(atom.label, atom.element, fract, cart, atom.occupancy))
+        unwrapped.append(CifAtom(
+            atom.label, atom.element, fract, cart, atom.occupancy,
+            disorder_group=atom.disorder_group,
+            disorder_assembly=atom.disorder_assembly
+        ))
     return unwrapped
 
 
@@ -335,6 +552,9 @@ def _infer_periodic_adjacency(structure: CifStructure):
             right_atom = structure.atoms[right_index]
             right_radius = covalent_radius(right_atom.element)
             cutoff = min(2.45, left_radius + right_radius + 0.45)
+            if left_atom.disorder_key is not None and right_atom.disorder_key is not None:
+                if left_atom.disorder_key != right_atom.disorder_key:
+                    continue
             delta_frac = np.asarray(right_atom.fract) - np.asarray(left_atom.fract)
             image_shift = -np.rint(delta_frac).astype(int)
             minimum_delta = delta_frac + image_shift
@@ -405,6 +625,9 @@ def infer_bonds(atoms: Sequence[RenderAtom]) -> List[Tuple[int, int]]:
     for left in range(len(atoms)):
         left_radius = covalent_radius(atoms[left].element)
         for right in range(left + 1, len(atoms)):
+            if atoms[left].disorder_key is not None and atoms[right].disorder_key is not None:
+                if atoms[left].disorder_key != atoms[right].disorder_key:
+                    continue
             right_radius = covalent_radius(atoms[right].element)
             cutoff = min(max_cutoff, left_radius + right_radius + 0.45)
             distance = float(np.linalg.norm(atoms[left].position - atoms[right].position))
@@ -573,7 +796,29 @@ def _atoms_from_loop(rows, lattice: np.ndarray) -> List[CifAtom]:
             except ValueError:
                 occupancy = None
 
-        atoms.append(CifAtom(label, element, fract, cart, occupancy))
+        g = row.get("_atom_site.disorder_group")
+        a = row.get("_atom_site.disorder_assembly")
+
+        def _normalize_disorder_string(val) -> Optional[str]:
+            if val is None:
+                return None
+            cleaned = str(val).strip().strip("'\"")
+            if cleaned in {".", "?", ""}:
+                return None
+            return cleaned
+
+        g = _normalize_disorder_string(g)
+        a = _normalize_disorder_string(a)
+
+        atoms.append(CifAtom(
+            label=label,
+            element=element,
+            fract=fract,
+            cart=cart,
+            occupancy=occupancy,
+            disorder_group=g,
+            disorder_assembly=a
+        ))
     return atoms
 
 
@@ -611,12 +856,19 @@ def write_supercell_cif(
     structure: CifStructure,
     repeats: Tuple[int, int, int],
     keep_connected: bool = True,
+    selected_disorder_key: Optional[str] = None,
 ) -> None:
     """Export the expanded supercell crystal structure as a P1 symmetry CIF file."""
     repeat_a, repeat_b, repeat_c = repeats
     base_atoms = (
         unwrap_connected_atoms(structure) if keep_connected else list(structure.atoms)
     )
+    
+    if selected_disorder_key is not None:
+        base_atoms = [
+            atom for atom in base_atoms
+            if atom.disorder_key is None or atom.disorder_key == selected_disorder_key
+        ]
     
     new_a = structure.cell_lengths[0] * repeat_a
     new_b = structure.cell_lengths[1] * repeat_b

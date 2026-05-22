@@ -98,12 +98,18 @@ class CifViewerWidget(QWidget):
             
         try:
             repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
+            
+            selected_key = None
+            if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
+                selected_key = self.disorder_combo.currentData()
+                
             from .parser import write_supercell_cif
             write_supercell_cif(
                 path,
                 self.structure,
                 repeats,
                 keep_connected=self.keep_connected.isChecked(),
+                selected_disorder_key=selected_key
             )
             QMessageBox.information(
                 self,
@@ -146,6 +152,17 @@ class CifViewerWidget(QWidget):
         self.structure_table.setVisible(False)
         struct_layout.addWidget(self.structure_table)
 
+        # Disorder selection row
+        disorder_row = QHBoxLayout()
+        self.disorder_label = QLabel("Disorder Part:")
+        self.disorder_combo = QComboBox()
+        self.disorder_combo.currentTextChanged.connect(self.render)
+        disorder_row.addWidget(self.disorder_label)
+        disorder_row.addWidget(self.disorder_combo, 1)
+        self.disorder_label.setVisible(False)
+        self.disorder_combo.setVisible(False)
+        struct_layout.addLayout(disorder_row)
+
         self.summary_label = QLabel(
             "Load a CIF file to visualize the completed unit cell and supercell."
         )
@@ -158,6 +175,35 @@ class CifViewerWidget(QWidget):
         struct_layout.addStretch(1)
 
         self.tabs.addTab(struct_tab, "Structure")
+
+        # --- Tab 2: Info (Refinement & Cell Metadata) ---
+        info_tab = QWidget()
+        info_layout = QFormLayout(info_tab)
+        
+        self.info_space_group = QLabel("N/A")
+        self.info_crystal_system = QLabel("N/A")
+        self.info_formula = QLabel("N/A")
+        self.info_r1 = QLabel("N/A")
+        self.info_wr2 = QLabel("N/A")
+        self.info_goof = QLabel("N/A")
+        
+        for lbl in (self.info_space_group, self.info_crystal_system, self.info_formula,
+                    self.info_r1, self.info_wr2, self.info_goof):
+            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            
+        info_layout.addRow("Space Group:", self.info_space_group)
+        info_layout.addRow("Crystal System:", self.info_crystal_system)
+        info_layout.addRow("Formula:", self.info_formula)
+        info_layout.addRow("R1:", self.info_r1)
+        info_layout.addRow("wR2:", self.info_wr2)
+        info_layout.addRow("GooF (S):", self.info_goof)
+        
+        self.simulate_xrd_btn = QPushButton("Simulate Powder Pattern (XRD)...")
+        self.simulate_xrd_btn.clicked.connect(self._simulate_powder_pattern)
+        self.simulate_xrd_btn.setEnabled(False)
+        info_layout.addRow(self.simulate_xrd_btn)
+        
+        self.tabs.addTab(info_tab, "Info")
 
         # --- Tab 2: Supercell ---
         supercell_tab = QWidget()
@@ -527,8 +573,68 @@ class CifViewerWidget(QWidget):
         row = selected_ranges[0].topRow()
         if 0 <= row < len(self.all_structures):
             self.structure = self.all_structures[row]
+            self._update_disorder_ui()
+            self._update_info_ui()
             self._reset_camera_on_next_render = True
             self.render()
+
+    def _update_disorder_ui(self):
+        if self.structure is None:
+            self.disorder_label.setVisible(False)
+            self.disorder_combo.setVisible(False)
+            return
+
+        keys = set()
+        for atom in self.structure.atoms:
+            key = atom.disorder_key
+            if key is not None:
+                keys.add(key)
+
+        if keys:
+            self.disorder_combo.blockSignals(True)
+            self.disorder_combo.clear()
+            self.disorder_combo.addItem("All Parts", None)
+            for k in sorted(keys):
+                self.disorder_combo.addItem(f"Part {k}", k)
+            self.disorder_combo.blockSignals(False)
+            
+            self.disorder_label.setVisible(True)
+            self.disorder_combo.setVisible(True)
+        else:
+            self.disorder_label.setVisible(False)
+            self.disorder_combo.setVisible(False)
+
+    def _update_info_ui(self):
+        if self.structure is None:
+            self.info_space_group.setText("N/A")
+            self.info_crystal_system.setText("N/A")
+            self.info_formula.setText("N/A")
+            self.info_r1.setText("N/A")
+            self.info_wr2.setText("N/A")
+            self.info_goof.setText("N/A")
+            self.simulate_xrd_btn.setEnabled(False)
+            return
+            
+        s = self.structure
+        self.info_space_group.setText(s.space_group or "N/A")
+        self.info_crystal_system.setText(s.crystal_system or "N/A")
+        self.info_formula.setText(s.formula or "N/A")
+        self.info_r1.setText(s.r1 or "N/A")
+        self.info_wr2.setText(s.wr2 or "N/A")
+        self.info_goof.setText(s.goof or "N/A")
+        self.simulate_xrd_btn.setEnabled(True)
+
+    def _simulate_powder_pattern(self):
+        if self.structure is None:
+            return
+        
+        selected_key = None
+        if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
+            selected_key = self.disorder_combo.currentData()
+            
+        from .viewer_xrd import PowderPatternDialog
+        dialog = PowderPatternDialog(self.structure, selected_key, self)
+        dialog.exec()
 
     def _settings_path(self):
         return os.path.join(os.path.dirname(__file__), "settings.json")
@@ -695,6 +801,9 @@ class CifViewerWidget(QWidget):
             self.structure_table.setVisible(False)
             self.structure = self.all_structures[0]
             
+        self._update_disorder_ui()
+        self._update_info_ui()
+            
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
         
@@ -751,8 +860,35 @@ class CifViewerWidget(QWidget):
 
         self.clear_view()
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
+        
+        structure_to_render = self.structure
+        selected_key = None
+        if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
+            selected_key = self.disorder_combo.currentData()
+            
+        if selected_key is not None:
+            filtered_atoms = [
+                atom for atom in self.structure.atoms
+                if atom.disorder_key is None or atom.disorder_key == selected_key
+            ]
+            from .parser import CifStructure
+            structure_to_render = CifStructure(
+                name=self.structure.name,
+                cell_lengths=self.structure.cell_lengths,
+                cell_angles=self.structure.cell_angles,
+                lattice=self.structure.lattice,
+                atoms=tuple(filtered_atoms),
+                u_cart=self.structure.u_cart,
+                space_group=self.structure.space_group,
+                crystal_system=self.structure.crystal_system,
+                formula=self.structure.formula,
+                r1=self.structure.r1,
+                wr2=self.structure.wr2,
+                goof=self.structure.goof
+            )
+
         atoms, bonds = expand_supercell(
-            self.structure,
+            structure_to_render,
             repeats,
             keep_connected=self.keep_connected.isChecked(),
         )

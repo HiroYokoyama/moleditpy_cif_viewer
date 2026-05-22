@@ -225,3 +225,246 @@ def test_cell_vectors_invalid():
     # Inconsistent angles
     with pytest.raises(ValueError):
         cell_vectors((10.0, 10.0, 10.0), (30.0, 30.0, 120.0))
+
+
+def test_parse_disorder_and_refinement_metadata():
+    disorder_cif = """
+data_DisorderTest
+_cell_length_a    10.0
+_cell_length_b    10.0
+_cell_length_c    10.0
+_cell_angle_alpha 90
+_cell_angle_beta  90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 21/c'
+_space_group_crystal_system monoclinic
+_chemical_formula_sum 'C10 H15 N O'
+_refine_ls_r_factor_gt 0.045
+_refine_ls_wr_factor_ref 0.120
+_refine_ls_goodness_of_fit_ref 1.05
+
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.1 0.1 0.1 1 A
+C2 C 0.2 0.2 0.2 2 A
+C3 C 0.3 0.3 0.3 . .
+"""
+    structure = parse_cif(disorder_cif)
+    assert structure.space_group == "P 21/c"
+    assert structure.crystal_system == "monoclinic"
+    assert structure.formula == "C10 H15 N O"
+    assert structure.r1 == "0.045"
+    assert structure.wr2 == "0.120"
+    assert structure.goof == "1.05"
+
+    assert len(structure.atoms) == 3
+    assert structure.atoms[0].disorder_group == "1"
+    assert structure.atoms[0].disorder_assembly == "A"
+    assert structure.atoms[0].disorder_key == "A_1"
+
+    assert structure.atoms[1].disorder_group == "2"
+    assert structure.atoms[1].disorder_assembly == "A"
+    assert structure.atoms[1].disorder_key == "A_2"
+
+    assert structure.atoms[2].disorder_group is None
+    assert structure.atoms[2].disorder_assembly is None
+    assert structure.atoms[2].disorder_key is None
+
+
+def test_parse_cif_file_pymatgen_disorder_and_metadata(tmp_path):
+    from cif_viewer.parser import parse_cif_file_pymatgen
+    cif_content = """
+data_DisorderPymatgen
+_cell_length_a    10.0
+_cell_length_b    10.0
+_cell_length_c    10.0
+_cell_angle_alpha 90
+_cell_angle_beta  90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 21/c'
+_space_group_crystal_system monoclinic
+_chemical_formula_sum 'C10 H15 N O'
+_refine_ls_r_factor_gt 0.045
+_refine_ls_wr_factor_ref 0.120
+_refine_ls_goodness_of_fit_ref 1.05
+
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.1 0.1 0.1 1 A
+C2 C 0.2 0.2 0.2 2 A
+C3 C 0.3 0.3 0.3 . .
+"""
+    cif_file = tmp_path / "disorder.cif"
+    cif_file.write_text(cif_content, encoding="utf-8")
+    
+    structures = parse_cif_file_pymatgen(str(cif_file))
+    assert len(structures) == 1
+    structure = structures[0]
+    
+    assert structure.space_group == "P 21/c"
+    assert structure.crystal_system == "monoclinic"
+    assert structure.formula == "C10 H15 N O"
+    assert structure.r1 == "0.045"
+    assert structure.wr2 == "0.120"
+    assert structure.goof == "1.05"
+    
+    assert len(structure.atoms) == 3
+    # Check that disorder assemblies and groups map correctly for the parsed atoms
+    # We sort by label or element just in case order differs in pymatgen
+    atoms_map = {a.label: a for a in structure.atoms}
+    assert "C1" in atoms_map
+    assert atoms_map["C1"].disorder_group == "1"
+    assert atoms_map["C1"].disorder_assembly == "A"
+    assert atoms_map["C1"].disorder_key == "A_1"
+    
+    assert "C2" in atoms_map
+    assert atoms_map["C2"].disorder_group == "2"
+    assert atoms_map["C2"].disorder_assembly == "A"
+    assert atoms_map["C2"].disorder_key == "A_2"
+    
+    assert "C3" in atoms_map
+    assert atoms_map["C3"].disorder_group is None
+    assert atoms_map["C3"].disorder_assembly is None
+    assert atoms_map["C3"].disorder_key is None
+
+
+def test_disorder_part_bond_exclusion():
+    cif = """
+data_disorder_bonds
+_cell_length_a 10
+_cell_length_b 10
+_cell_length_c 10
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.5 0.5 0.5 1 A
+C2 C 0.5 0.5 0.6 2 A
+C3 C 0.5 0.5 0.4 . .
+"""
+    structure = parse_cif(cif)
+    atoms, bonds = expand_supercell(structure, (1, 1, 1), keep_connected=False)
+    
+    assert len(structure.atoms) == 3
+    # C1 and C2 are in different groups (A_1 vs A_2), so they should not form a bond.
+    # C1 (index 0) and C3 (index 2, framework atom) should form a bond.
+    assert (0, 1) not in bonds
+    assert (1, 0) not in bonds
+    assert (0, 2) in bonds or (2, 0) in bonds
+
+
+def test_write_supercell_cif_with_disorder_filtering(tmp_path):
+    cif = """
+data_disorder_export
+_cell_length_a 10
+_cell_length_b 10
+_cell_length_c 10
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.5 0.5 0.5 1 A
+C2 C 0.5 0.5 0.6 2 A
+C3 C 0.5 0.5 0.4 . .
+"""
+    structure = parse_cif(cif)
+    export_path = tmp_path / "supercell_disorder.cif"
+    write_supercell_cif(
+        str(export_path),
+        structure,
+        (1, 1, 1),
+        keep_connected=False,
+        selected_disorder_key="A_1"
+    )
+    
+    exported = parse_cif(export_path.read_text(encoding="utf-8"))
+    atoms_map = {a.label.split("_")[0]: a for a in exported.atoms}
+    assert "C1" in atoms_map
+    assert "C3" in atoms_map
+    assert "C2" not in atoms_map
+
+
+def test_user_disorder_loop_structure(tmp_path):
+    cif_content = """
+data_user_disorder
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta  90
+_cell_angle_gamma 90
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+  _atom_site_U_iso_or_equiv
+  _atom_site_adp_type
+  _atom_site_occupancy
+  _atom_site_site_symmetry_order
+  _atom_site_calc_flag
+  _atom_site_refinement_flags_posn
+  _atom_site_refinement_flags_adp
+  _atom_site_refinement_flags_occupancy
+  _atom_site_disorder_assembly
+  _atom_site_disorder_group
+C1 C 0.1 0.1 0.1 0.05 Uani 1.0 1 d . . . A 1
+C2 C 0.2 0.2 0.2 0.05 Uani 1.0 1 d . . . A 2
+C3 C 0.3 0.3 0.3 0.05 Uani 1.0 1 d . . . . .
+"""
+    # 1. Pure Python parser
+    struct = parse_cif(cif_content)
+    assert len(struct.atoms) == 3
+    assert struct.atoms[0].disorder_assembly == "A"
+    assert struct.atoms[0].disorder_group == "1"
+    assert struct.atoms[1].disorder_assembly == "A"
+    assert struct.atoms[1].disorder_group == "2"
+    assert struct.atoms[2].disorder_assembly is None
+    assert struct.atoms[2].disorder_group is None
+
+    # 2. Pymatgen parser
+    cif_file = tmp_path / "user_disorder.cif"
+    cif_file.write_text(cif_content, encoding="utf-8")
+    from cif_viewer.parser import parse_cif_file_pymatgen
+    structures = parse_cif_file_pymatgen(str(cif_file))
+    assert len(structures) == 1
+    struct_pm = structures[0]
+    atoms_map = {a.label: a for a in struct_pm.atoms}
+
+    assert atoms_map["C1"].disorder_assembly == "A"
+    assert atoms_map["C1"].disorder_group == "1"
+    assert atoms_map["C2"].disorder_assembly == "A"
+    assert atoms_map["C2"].disorder_group == "2"
+    assert atoms_map["C3"].disorder_assembly is None
+    assert atoms_map["C3"].disorder_group is None
+
+
+
+

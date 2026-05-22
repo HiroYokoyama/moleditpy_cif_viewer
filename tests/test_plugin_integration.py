@@ -1061,3 +1061,324 @@ def test_cif_viewer_widget_view_from_axis(qtbot):
     assert np.allclose(pos - focal, [-2.0, 0.0, 0.0])
     assert np.allclose(up, [0.0, 0.0, 1.0])
 
+
+def test_cif_viewer_widget_disorder_and_info(qtbot, tmp_path):
+    from cif_viewer.viewer import CifViewerWidget
+    
+    cif_content = """data_disorder_info
+_space_group_name_h-m_alt 'P 21/c'
+_space_group_crystal_system monoclinic
+_chemical_formula_sum 'C10 H15 N O'
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_refine_ls_r_factor_gt 0.045
+_refine_ls_wr_factor_ref 0.120
+_refine_ls_goodness_of_fit_ref 1.05
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.1 0.1 0.1 1 A
+C2 C 0.2 0.2 0.2 2 A
+C3 C 0.3 0.3 0.3 . .
+"""
+    cif_file = tmp_path / "disorder_info.cif"
+    cif_file.write_text(cif_content, encoding="utf-8")
+    
+    context = StubContext()
+    class FakePlotter:
+        def __init__(self):
+            self.cleared = False
+        def clear(self): self.cleared = True
+        def add_lines(self, *args, **kwargs): pass
+        def add_point_labels(self, *args, **kwargs): pass
+        def render(self): pass
+        def reset_camera(self): pass
+    context.plotter = FakePlotter()
+    
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    widget.show()
+    widget.load_cif(str(cif_file))
+    
+    # 1. Verify Info Tab Labels
+    assert widget.info_space_group.text() == "P 21/c"
+    assert widget.info_r1.text() == "0.045"
+    assert widget.info_wr2.text() == "0.120"
+    assert widget.info_goof.text() == "1.05"
+    assert widget.simulate_xrd_btn.isEnabled() is True
+    
+    # 2. Verify Disorder Dropdown UI visibility and items
+    assert widget.disorder_label.isVisible() is True
+    assert widget.disorder_combo.isVisible() is True
+    assert widget.disorder_combo.count() == 3
+    assert widget.disorder_combo.itemText(0) == "All Parts"
+    assert widget.disorder_combo.itemText(1) == "Part A_1"
+    assert widget.disorder_combo.itemText(2) == "Part A_2"
+    
+    # 3. Verify render filtering
+    # Index 0: All parts
+    widget.disorder_combo.setCurrentIndex(0)
+    widget._render_now()
+    assert len(widget.last_rendered_atoms) == 3
+    
+    # Index 1: Part A_1 (C1 and C3, C2 should be filtered out)
+    widget.disorder_combo.setCurrentIndex(1)
+    widget._render_now()
+    assert len(widget.last_rendered_atoms) == 2
+    atoms_map = {a.label: a for a in widget.last_rendered_atoms}
+    assert "C1" in atoms_map
+    assert "C3" in atoms_map
+    assert "C2" not in atoms_map
+    
+    # Index 2: Part A_2 (C2 and C3, C1 should be filtered out)
+    widget.disorder_combo.setCurrentIndex(2)
+    widget._render_now()
+    assert len(widget.last_rendered_atoms) == 2
+    atoms_map = {a.label: a for a in widget.last_rendered_atoms}
+    assert "C2" in atoms_map
+    assert "C3" in atoms_map
+    assert "C1" not in atoms_map
+
+
+def test_cif_viewer_widget_export_with_disorder(qtbot, tmp_path, monkeypatch):
+    from cif_viewer.viewer import CifViewerWidget
+    
+    cif_content = """data_export
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.1 0.1 0.1 1 A
+C2 C 0.2 0.2 0.2 2 A
+C3 C 0.3 0.3 0.3 . .
+"""
+    cif_file = tmp_path / "export_disorder.cif"
+    cif_file.write_text(cif_content, encoding="utf-8")
+    
+    context = StubContext()
+    class FakePlotter:
+        def __init__(self):
+            self.cleared = False
+        def clear(self): self.cleared = True
+        def add_lines(self, *args, **kwargs): pass
+        def add_point_labels(self, *args, **kwargs): pass
+        def render(self): pass
+        def reset_camera(self): pass
+    context.plotter = FakePlotter()
+    
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    widget.show()
+    widget.load_cif(str(cif_file))
+    
+    # Select Part A_1 (index 1)
+    widget.disorder_combo.setCurrentIndex(1)
+    
+    # Mock QFileDialog.getSaveFileName to return our target export path
+    export_path = tmp_path / "exported_supercell.cif"
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(export_path), "Crystallographic Information Files (*.cif)")
+    )
+    
+    # Mock QMessageBox.information
+    info_calls = []
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QMessageBox.information",
+        lambda *args, **kwargs: info_calls.append(args)
+    )
+    
+    widget._export_supercell()
+    assert export_path.exists()
+    
+    # Read the exported CIF and check atoms.
+    # C2 (disorder Part A_2) should not be exported since we selected Part A_1.
+    from cif_viewer.parser import parse_cif
+    exported_struct = parse_cif(export_path.read_text(encoding="utf-8"))
+    exported_labels = {a.label.split("_")[0] for a in exported_struct.atoms}
+    assert "C1" in exported_labels
+    assert "C3" in exported_labels
+    assert "C2" not in exported_labels
+
+
+def test_powder_pattern_dialog(qtbot):
+    from cif_viewer.viewer_xrd import PowderPatternDialog, make_pymatgen_structure
+    from cif_viewer.parser import parse_cif
+    import numpy as np
+    
+    cif_content = """data_xrd
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_disorder_group
+_atom_site_disorder_assembly
+C1 C 0.1 0.1 0.1 1 A
+C2 C 0.2 0.2 0.2 2 A
+C3 C 0.3 0.3 0.3 . .
+"""
+    structure = parse_cif(cif_content)
+    
+    # Test make_pymatgen_structure helper
+    pm_struct_all = make_pymatgen_structure(structure, selected_disorder_key=None)
+    assert len(pm_struct_all) == 3
+    # Check partial occupancies (since disorder key is None, they keep their values, defaulting to 1.0 here)
+    assert pm_struct_all[0].species.num_atoms == 1.0
+    
+    pm_struct_part1 = make_pymatgen_structure(structure, selected_disorder_key="A_1")
+    assert len(pm_struct_part1) == 2
+    # Disordered atoms in the selected group should have their occupancy normalized to 1.0
+    assert pm_struct_part1[0].species.num_atoms == 1.0
+    
+    # Test symmetry expansion helper
+    from cif_viewer.parser import CifStructure, CifAtom
+    lattice = np.eye(3) * 5.0
+    cif_atom = CifAtom(label="C1", element="C", fract=np.array([0.1, 0.2, 0.3]), cart=np.array([0.5, 1.0, 1.5]), occupancy=0.8, disorder_group="1", disorder_assembly="A")
+    asym_struct = CifStructure(
+        name="test_sym",
+        cell_lengths=(5.0, 5.0, 5.0),
+        cell_angles=(90.0, 90.0, 90.0),
+        lattice=lattice,
+        atoms=(cif_atom,),
+        space_group="P -1",  # P-1 has inversion symmetry: (x,y,z) and (-x,-y,-z)
+        is_asymmetric_unit_only=True
+    )
+    pm_struct_sym = make_pymatgen_structure(asym_struct)
+    # P-1 should expand 1 atom to 2 atoms
+    assert len(pm_struct_sym) == 2
+    assert pm_struct_sym[0].species.num_atoms == 0.8
+
+    dialog = PowderPatternDialog(structure, selected_disorder_key="A_1")
+    qtbot.addWidget(dialog)
+    
+    # Verify defaults
+    assert dialog.source_combo.currentText() == "CuKa"
+    assert np.isclose(dialog.wavelength_spin.value(), 1.5418)
+    assert dialog.wavelength_spin.isEnabled() is False
+    
+    # Verify new pattern style controls
+    assert dialog.pattern_type_combo.currentText() == "Profile (Gaussian)"
+    assert dialog.fwhm_spin.isEnabled() is True
+    assert dialog.show_sticks_chk.isEnabled() is True
+    
+    # Test change source to MoKa
+    dialog.source_combo.setCurrentText("MoKa")
+    assert np.isclose(dialog.wavelength_spin.value(), 0.7107)
+    assert dialog.wavelength_spin.isEnabled() is False
+    
+    # Test change source to Custom
+    dialog.source_combo.setCurrentText("Custom")
+    assert dialog.wavelength_spin.isEnabled() is True
+    dialog.wavelength_spin.setValue(1.8)
+    
+    # Test changing min/max 2-theta
+    dialog.min_theta_spin.setValue(10.0)
+    dialog.max_theta_spin.setValue(80.0)
+    
+    # Test changing pattern style to Sticks Only
+    dialog.pattern_type_combo.setCurrentText("Sticks Only")
+    assert dialog.fwhm_spin.isEnabled() is False
+    assert dialog.show_sticks_chk.isEnabled() is False
+    
+    # Test changing pattern style to Profile (Lorentzian)
+    dialog.pattern_type_combo.setCurrentText("Profile (Lorentzian)")
+    assert dialog.fwhm_spin.isEnabled() is True
+    dialog.fwhm_spin.setValue(0.15)
+    
+    # Test toggle peak labels and show sticks
+    dialog.label_peaks_chk.setChecked(False)
+    dialog.show_sticks_chk.setChecked(False)
+    
+    # Verify that the calculation ran and updated the plot without errors
+    assert len(dialog.fig.axes) == 1
+
+
+def test_cif_viewer_widget_simulate_powder_pattern_trigger(qtbot, tmp_path, monkeypatch):
+    from cif_viewer.viewer import CifViewerWidget
+    
+    cif_content = """data_xrd_trig
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    cif_file = tmp_path / "xrd_trig.cif"
+    cif_file.write_text(cif_content, encoding="utf-8")
+    
+    context = StubContext()
+    class FakePlotter:
+        def __init__(self):
+            self.cleared = False
+        def clear(self): self.cleared = True
+        def add_lines(self, *args, **kwargs): pass
+        def add_point_labels(self, *args, **kwargs): pass
+        def render(self): pass
+        def reset_camera(self): pass
+    context.plotter = FakePlotter()
+    
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+    widget.load_cif(str(cif_file))
+    
+    dialog_instantiated = []
+    dialog_exec_called = []
+    
+    from cif_viewer.viewer_xrd import PowderPatternDialog
+    orig_init = PowderPatternDialog.__init__
+    
+    def mock_init(self, cif_structure, selected_disorder_key=None, parent=None):
+        orig_init(self, cif_structure, selected_disorder_key, parent)
+        dialog_instantiated.append((cif_structure, selected_disorder_key))
+        
+    def mock_exec(self):
+        dialog_exec_called.append(True)
+        return 1
+        
+    monkeypatch.setattr(PowderPatternDialog, "__init__", mock_init)
+    monkeypatch.setattr(PowderPatternDialog, "exec", mock_exec)
+    
+    # Click the simulate XRD button
+    widget.simulate_xrd_btn.click()
+    
+    assert len(dialog_instantiated) == 1
+    assert dialog_instantiated[0][0].name == "xrd_trig"
+    assert dialog_instantiated[0][1] is None
+    assert len(dialog_exec_called) == 1
+
+

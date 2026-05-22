@@ -1,5 +1,5 @@
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.4.0"
+PLUGIN_VERSION = "0.5.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DESCRIPTION = (
     "Visualization-only CIF crystal structure viewer with unit-cell and "
