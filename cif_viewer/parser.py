@@ -46,6 +46,40 @@ class CifStructure:
     wr2: Optional[str] = None
     goof: Optional[str] = None
     is_asymmetric_unit_only: bool = False
+    cell_a_str: Optional[str] = None
+    cell_b_str: Optional[str] = None
+    cell_c_str: Optional[str] = None
+    cell_alpha_str: Optional[str] = None
+    cell_beta_str: Optional[str] = None
+    cell_gamma_str: Optional[str] = None
+    volume: Optional[str] = None
+    z: Optional[str] = None
+    density: Optional[str] = None
+    mu: Optional[str] = None
+    f000: Optional[str] = None
+    temp: Optional[str] = None
+    wavelength: Optional[str] = None
+    crystal_size: Optional[str] = None
+    theta_range: Optional[str] = None
+    hkl_ranges: Optional[str] = None
+    reflns_collected: Optional[str] = None
+    reflns_unique: Optional[str] = None
+    r_int: Optional[str] = None
+    completeness: Optional[str] = None
+    refinement_method: Optional[str] = None
+    num_reflns: Optional[str] = None
+    num_params: Optional[str] = None
+    num_restraints: Optional[str] = None
+    max_shift: Optional[str] = None
+    diff_peak_hole: Optional[str] = None
+    r1_gt: Optional[str] = None
+    wr2_gt: Optional[str] = None
+    r1_all: Optional[str] = None
+    wr2_all: Optional[str] = None
+    z_prime: Optional[str] = None
+    flack: Optional[str] = None
+    hooft: Optional[str] = None
+
 
 
 @dataclass(frozen=True)
@@ -82,6 +116,93 @@ def _get_first_tag_value(block_data, keys: List[str]) -> Optional[str]:
                 if cleaned not in {".", "?", ""}:
                     return cleaned
     return None
+
+
+def _extract_metadata(get_val) -> Dict[str, Optional[str]]:
+    c_max = get_val(["_exptl_crystal_size_max"])
+    c_mid = get_val(["_exptl_crystal_size_mid"])
+    c_min = get_val(["_exptl_crystal_size_min"])
+    if c_max and c_mid and c_min:
+        crystal_size = f"{c_max} x {c_mid} x {c_min}"
+    elif c_max:
+        crystal_size = c_max
+    else:
+        crystal_size = None
+
+    t_min = get_val(["_diffrn_reflns_theta_min"])
+    t_max = get_val(["_diffrn_reflns_theta_max"])
+    if t_min and t_max:
+        theta_range = f"{t_min} to {t_max}"
+    elif t_max:
+        theta_range = f"up to {t_max}"
+    else:
+        theta_range = None
+
+    h_min = get_val(["_diffrn_reflns_limit_h_min"])
+    h_max = get_val(["_diffrn_reflns_limit_h_max"])
+    k_min = get_val(["_diffrn_reflns_limit_k_min"])
+    k_max = get_val(["_diffrn_reflns_limit_k_max"])
+    l_min = get_val(["_diffrn_reflns_limit_l_min"])
+    l_max = get_val(["_diffrn_reflns_limit_l_max"])
+    if all(v is not None for v in [h_min, h_max, k_min, k_max, l_min, l_max]):
+        hkl_ranges = f"h: {h_min}/{h_max}, k: {k_min}/{k_max}, l: {l_min}/{l_max}"
+    else:
+        hkl_ranges = None
+
+    dp_max = get_val(["_refine_diff_density_max"])
+    dp_min = get_val(["_refine_diff_density_min"])
+    if dp_max and dp_min:
+        diff_peak_hole = f"{dp_max} / {dp_min}"
+    elif dp_max:
+        diff_peak_hole = dp_max
+    else:
+        diff_peak_hole = None
+
+    z = get_val(["_cell_formula_units_z"])
+    z_prime = get_val([
+        "_cell_formula_units_z'",
+        "_cell_formula_units_zprime",
+        "_cell_formula_units_z_prime"
+    ])
+    flack = get_val(["_refine_absolute_configuration_flack"])
+    hooft = get_val(["_refine_absolute_configuration_hooft"])
+
+    return {
+        "cell_a_str": get_val(["_cell_length_a"]),
+        "cell_b_str": get_val(["_cell_length_b"]),
+        "cell_c_str": get_val(["_cell_length_c"]),
+        "cell_alpha_str": get_val(["_cell_angle_alpha"]),
+        "cell_beta_str": get_val(["_cell_angle_beta"]),
+        "cell_gamma_str": get_val(["_cell_angle_gamma"]),
+        "volume": get_val(["_cell_volume"]),
+        "z": z,
+        "z_prime": z_prime,
+        "density": get_val(["_exptl_crystal_density_diffrn", "_exptl_crystal_density_meas"]),
+        "mu": get_val(["_exptl_absorpt_coefficient_mu"]),
+        "f000": get_val(["_exptl_crystal_f_000"]),
+        "temp": get_val(["_diffrn_ambient_temperature", "_diffrn_reflns_temperature"]),
+        "wavelength": get_val(["_diffrn_radiation_wavelength"]),
+        "crystal_size": crystal_size,
+        "theta_range": theta_range,
+        "hkl_ranges": hkl_ranges,
+        "reflns_collected": get_val(["_diffrn_reflns_number"]),
+        "reflns_unique": get_val(["_refine_ls_number_reflns"]),
+        "r_int": get_val(["_diffrn_reflns_av_r_equivalents", "_diffrn_reflns_av_uneti/neti"]),
+        "completeness": get_val(["_diffrn_measured_fraction_theta_max", "_diffrn_measured_fraction_theta_full"]),
+        "refinement_method": get_val(["_refine_ls_structure_factor_coef"]),
+        "num_reflns": get_val(["_refine_ls_number_reflns"]),
+        "num_params": get_val(["_refine_ls_number_parameters"]),
+        "num_restraints": get_val(["_refine_ls_number_restraints"]),
+        "max_shift": get_val(["_refine_ls_shift/su_max", "_refine_ls_shift/esd_max"]),
+        "diff_peak_hole": diff_peak_hole,
+        "flack": flack,
+        "hooft": hooft,
+        "r1_gt": get_val(["_refine_ls_r_factor_gt", "_refine_ls_r_factor_obs"]),
+        "wr2_gt": get_val(["_refine_ls_wr_factor_gt"]),
+        "r1_all": get_val(["_refine_ls_r_factor_all"]),
+        "wr2_all": get_val(["_refine_ls_wr_factor_all", "_refine_ls_wr_factor_ref"]),
+    }
+
 
 
 def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
@@ -305,6 +426,8 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 "_refine_ls_goodness_of_fit_all"
             ])
 
+            metadata = _extract_metadata(lambda keys: _get_first_tag_value(block.data, keys))
+
             cif_struct = _structure_from_pymatgen(
                 struct,
                 name or "Structure",
@@ -315,8 +438,10 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 formula=formula,
                 r1=r1,
                 wr2=wr2,
-                goof=goof
+                goof=goof,
+                **metadata
             )
+
             structures.append(cif_struct)
         except Exception:
             pass
@@ -335,6 +460,7 @@ def _structure_from_pymatgen(
     r1: Optional[str] = None,
     wr2: Optional[str] = None,
     goof: Optional[str] = None,
+    **kwargs,
 ) -> CifStructure:
     cell_lengths = struct.lattice.lengths
     cell_angles = struct.lattice.angles
@@ -377,8 +503,10 @@ def _structure_from_pymatgen(
         r1=r1,
         wr2=wr2,
         goof=goof,
-        is_asymmetric_unit_only=False
+        is_asymmetric_unit_only=False,
+        **kwargs
     )
+
 
 
 
@@ -440,6 +568,8 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
         "_refine_ls_goodness_of_fit_all"
     ])
 
+    metadata = _extract_metadata(lambda keys: _get_tag_value_dict(tags, keys))
+
     return CifStructure(
         structure_name, lengths, angles, lattice, tuple(atoms),
         space_group=space_group,
@@ -448,8 +578,10 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
         r1=r1,
         wr2=wr2,
         goof=goof,
-        is_asymmetric_unit_only=True
+        is_asymmetric_unit_only=True,
+        **metadata
     )
+
 
 
 def cell_vectors(

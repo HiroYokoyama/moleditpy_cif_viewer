@@ -1075,8 +1075,41 @@ _cell_length_c 10.0
 _cell_angle_alpha 90
 _cell_angle_beta 90
 _cell_angle_gamma 90
+_cell_volume 1000.0
+_cell_formula_units_z 4
+_cell_formula_units_zprime 1.5
+_refine_absolute_configuration_flack 0.02(5)
+_refine_absolute_configuration_hooft 0.03(4)
+_exptl_crystal_density_diffrn 1.25
+_exptl_absorpt_coefficient_mu 0.12
+_exptl_crystal_f_000 240
+_diffrn_ambient_temperature 293
+_diffrn_radiation_wavelength 0.71073
+_exptl_crystal_size_max 0.3
+_exptl_crystal_size_mid 0.2
+_exptl_crystal_size_min 0.1
+_diffrn_reflns_theta_min 2.5
+_diffrn_reflns_theta_max 27.5
+_diffrn_reflns_limit_h_min -12
+_diffrn_reflns_limit_h_max 12
+_diffrn_reflns_limit_k_min -12
+_diffrn_reflns_limit_k_max 12
+_diffrn_reflns_limit_l_min -12
+_diffrn_reflns_limit_l_max 12
+_diffrn_reflns_number 5000
+_refine_ls_number_reflns 4500
+_diffrn_reflns_av_r_equivalents 0.032
+_diffrn_measured_fraction_theta_max 0.99
+_refine_ls_structure_factor_coef Fsqd
+_refine_ls_number_parameters 150
+_refine_ls_number_restraints 0
+_refine_ls_shift/su_max 0.002
+_refine_diff_density_max 0.25
+_refine_diff_density_min -0.25
 _refine_ls_r_factor_gt 0.045
 _refine_ls_wr_factor_ref 0.120
+_refine_ls_r_factor_all 0.055
+_refine_ls_wr_factor_all 0.130
 _refine_ls_goodness_of_fit_ref 1.05
 loop_
 _atom_site_label
@@ -1110,10 +1143,46 @@ C3 C 0.3 0.3 0.3 . .
     widget.load_cif(str(cif_file))
     
     # 1. Verify Info Tab Labels
+    assert widget.info_formula.text() == "C10 H15 N O"
     assert widget.info_space_group.text() == "P 21/c"
+    assert widget.info_crystal_system.text() == "monoclinic"
+    assert widget.info_cell_a.text() == "10.0"
+    assert widget.info_cell_b.text() == "10.0"
+    assert widget.info_cell_c.text() == "10.0"
+    assert widget.info_cell_alpha.text() == "90"
+    assert widget.info_cell_beta.text() == "90"
+    assert widget.info_cell_gamma.text() == "90"
+    assert widget.info_volume.text() == "1000.0"
+    assert widget.info_z.text() == "4"
+    assert widget.info_z_prime.text() == "1.5"
+    assert widget.info_density.text() == "1.25"
+    assert widget.info_mu.text() == "0.12"
+    assert widget.info_f000.text() == "240"
+    
+    assert widget.info_temp.text() == "293"
+    assert widget.info_wavelength.text() == "0.71073"
+    assert widget.info_crystal_size.text() == "0.3 x 0.2 x 0.1"
+    assert widget.info_theta_range.text() == "2.5 to 27.5"
+    assert widget.info_hkl_ranges.text() == "h: -12/12, k: -12/12, l: -12/12"
+    assert widget.info_reflns_collected.text() == "5000"
+    assert widget.info_reflns_unique.text() == "4500"
+    assert widget.info_r_int.text() == "0.032"
+    assert widget.info_completeness.text() == "0.99"
+    
+    assert widget.info_refinement_method.text() == "Fsqd"
+    assert widget.info_num_reflns.text() == "4500"
+    assert widget.info_num_params.text() == "150"
+    assert widget.info_num_restraints.text() == "0"
+    assert widget.info_goof.text() == "1.05"
     assert widget.info_r1.text() == "0.045"
     assert widget.info_wr2.text() == "0.120"
-    assert widget.info_goof.text() == "1.05"
+    assert widget.info_r1_all.text() == "0.055"
+    assert widget.info_wr2_all.text() == "0.130"
+    assert widget.info_max_shift.text() == "0.002"
+    assert widget.info_flack.text() == "0.02(5)"
+    assert widget.info_hooft.text() == "0.03(4)"
+    assert widget.info_diff_peak_hole.text() == "0.25 / -0.25"
+    
     assert widget.simulate_xrd_btn.isEnabled() is True
     
     # 2. Verify Disorder Dropdown UI visibility and items

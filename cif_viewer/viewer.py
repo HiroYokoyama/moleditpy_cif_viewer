@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QTabWidget,
     QColorDialog,
+    QScrollArea,
 )
 
 from .parser import (
@@ -177,33 +178,143 @@ class CifViewerWidget(QWidget):
         self.tabs.addTab(struct_tab, "Structure")
 
         # --- Tab 2: Info (Refinement & Cell Metadata) ---
-        info_tab = QWidget()
-        info_layout = QFormLayout(info_tab)
+        info_tab = QScrollArea()
+        info_tab.setWidgetResizable(True)
         
+        info_content = QWidget()
+        info_content_layout = QVBoxLayout(info_content)
+        info_content_layout.setContentsMargins(5, 5, 5, 5)
+        info_content_layout.setSpacing(10)
+        
+        # 1. Crystal & Unit Cell Group
+        group_cell = QGroupBox("Crystal & Unit Cell")
+        layout_cell = QFormLayout(group_cell)
+        layout_cell.setContentsMargins(5, 5, 5, 5)
+        layout_cell.setSpacing(5)
+        
+        self.info_formula = QLabel("N/A")
         self.info_space_group = QLabel("N/A")
         self.info_crystal_system = QLabel("N/A")
-        self.info_formula = QLabel("N/A")
+        self.info_cell_a = QLabel("N/A")
+        self.info_cell_b = QLabel("N/A")
+        self.info_cell_c = QLabel("N/A")
+        self.info_cell_alpha = QLabel("N/A")
+        self.info_cell_beta = QLabel("N/A")
+        self.info_cell_gamma = QLabel("N/A")
+        self.info_volume = QLabel("N/A")
+        self.info_z = QLabel("N/A")
+        self.info_z_prime = QLabel("N/A")
+        self.info_density = QLabel("N/A")
+        self.info_mu = QLabel("N/A")
+        self.info_f000 = QLabel("N/A")
+        
+        layout_cell.addRow("Formula:", self.info_formula)
+        layout_cell.addRow("Space Group:", self.info_space_group)
+        layout_cell.addRow("Crystal System:", self.info_crystal_system)
+        layout_cell.addRow("a (Å):", self.info_cell_a)
+        layout_cell.addRow("b (Å):", self.info_cell_b)
+        layout_cell.addRow("c (Å):", self.info_cell_c)
+        layout_cell.addRow("α (°):", self.info_cell_alpha)
+        layout_cell.addRow("β (°):", self.info_cell_beta)
+        layout_cell.addRow("γ (°):", self.info_cell_gamma)
+        layout_cell.addRow("Volume (Å³):", self.info_volume)
+        layout_cell.addRow("Z:", self.info_z)
+        layout_cell.addRow("Z':", self.info_z_prime)
+        layout_cell.addRow("Density (calc. g/cm³):", self.info_density)
+        layout_cell.addRow("μ (mm⁻¹):", self.info_mu)
+        layout_cell.addRow("F(000):", self.info_f000)
+        
+        # 2. Data Collection Group
+        group_data = QGroupBox("Data Collection")
+        layout_data = QFormLayout(group_data)
+        layout_data.setContentsMargins(5, 5, 5, 5)
+        layout_data.setSpacing(5)
+        
+        self.info_temp = QLabel("N/A")
+        self.info_wavelength = QLabel("N/A")
+        self.info_crystal_size = QLabel("N/A")
+        self.info_theta_range = QLabel("N/A")
+        self.info_hkl_ranges = QLabel("N/A")
+        self.info_reflns_collected = QLabel("N/A")
+        self.info_reflns_unique = QLabel("N/A")
+        self.info_r_int = QLabel("N/A")
+        self.info_completeness = QLabel("N/A")
+        
+        layout_data.addRow("Temperature (K):", self.info_temp)
+        layout_data.addRow("Wavelength (Å):", self.info_wavelength)
+        layout_data.addRow("Crystal Size (mm):", self.info_crystal_size)
+        layout_data.addRow("θ Range (°):", self.info_theta_range)
+        layout_data.addRow("Index Ranges:", self.info_hkl_ranges)
+        layout_data.addRow("Reflns Collected:", self.info_reflns_collected)
+        layout_data.addRow("Reflns Unique:", self.info_reflns_unique)
+        layout_data.addRow("R(int):", self.info_r_int)
+        layout_data.addRow("Completeness:", self.info_completeness)
+        
+        # 3. Refinement Group
+        group_refine = QGroupBox("Refinement")
+        layout_refine = QFormLayout(group_refine)
+        layout_refine.setContentsMargins(5, 5, 5, 5)
+        layout_refine.setSpacing(5)
+        
+        self.info_refinement_method = QLabel("N/A")
+        self.info_num_reflns = QLabel("N/A")
+        self.info_num_params = QLabel("N/A")
+        self.info_num_restraints = QLabel("N/A")
+        self.info_goof = QLabel("N/A")
         self.info_r1 = QLabel("N/A")
         self.info_wr2 = QLabel("N/A")
-        self.info_goof = QLabel("N/A")
+        self.info_r1_all = QLabel("N/A")
+        self.info_wr2_all = QLabel("N/A")
+        self.info_max_shift = QLabel("N/A")
+        self.info_flack = QLabel("N/A")
+        self.info_hooft = QLabel("N/A")
+        self.info_diff_peak_hole = QLabel("N/A")
         
-        for lbl in (self.info_space_group, self.info_crystal_system, self.info_formula,
-                    self.info_r1, self.info_wr2, self.info_goof):
+        layout_refine.addRow("Refinement Method:", self.info_refinement_method)
+        layout_refine.addRow("No. Reflns:", self.info_num_reflns)
+        layout_refine.addRow("No. Parameters:", self.info_num_params)
+        layout_refine.addRow("No. Restraints:", self.info_num_restraints)
+        layout_refine.addRow("GooF (S):", self.info_goof)
+        layout_refine.addRow("R1 [I > 2σ(I)]:", self.info_r1)
+        layout_refine.addRow("wR2 [I > 2σ(I)]:", self.info_wr2)
+        layout_refine.addRow("R1 (all data):", self.info_r1_all)
+        layout_refine.addRow("wR2 (all data):", self.info_wr2_all)
+        layout_refine.addRow("Max Shift/s.u.:", self.info_max_shift)
+        layout_refine.addRow("Flack Parameter:", self.info_flack)
+        layout_refine.addRow("Hooft Parameter:", self.info_hooft)
+        layout_refine.addRow("Diff Peak/Hole (e/Å³):", self.info_diff_peak_hole)
+        
+        # Enable text selection
+        all_info_labels = [
+            self.info_formula, self.info_space_group, self.info_crystal_system,
+            self.info_cell_a, self.info_cell_b, self.info_cell_c,
+            self.info_cell_alpha, self.info_cell_beta, self.info_cell_gamma,
+            self.info_volume, self.info_z, self.info_z_prime,
+            self.info_density, self.info_mu, self.info_f000,
+            self.info_temp, self.info_wavelength, self.info_crystal_size,
+            self.info_theta_range, self.info_hkl_ranges, self.info_reflns_collected,
+            self.info_reflns_unique, self.info_r_int, self.info_completeness,
+            self.info_refinement_method, self.info_num_reflns, self.info_num_params,
+            self.info_num_restraints, self.info_goof, self.info_r1,
+            self.info_wr2, self.info_r1_all, self.info_wr2_all,
+            self.info_max_shift, self.info_flack, self.info_hooft,
+            self.info_diff_peak_hole
+        ]
+        for lbl in all_info_labels:
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             
-        info_layout.addRow("Space Group:", self.info_space_group)
-        info_layout.addRow("Crystal System:", self.info_crystal_system)
-        info_layout.addRow("Formula:", self.info_formula)
-        info_layout.addRow("R1:", self.info_r1)
-        info_layout.addRow("wR2:", self.info_wr2)
-        info_layout.addRow("GooF (S):", self.info_goof)
+        info_content_layout.addWidget(group_cell)
+        info_content_layout.addWidget(group_data)
+        info_content_layout.addWidget(group_refine)
         
         self.simulate_xrd_btn = QPushButton("Simulate Powder Pattern (XRD)...")
         self.simulate_xrd_btn.clicked.connect(self._simulate_powder_pattern)
         self.simulate_xrd_btn.setEnabled(False)
-        info_layout.addRow(self.simulate_xrd_btn)
+        info_content_layout.addWidget(self.simulate_xrd_btn)
         
+        info_tab.setWidget(info_content)
         self.tabs.addTab(info_tab, "Info")
+
 
         # --- Tab 2: Supercell ---
         supercell_tab = QWidget()
@@ -606,22 +717,67 @@ class CifViewerWidget(QWidget):
 
     def _update_info_ui(self):
         if self.structure is None:
-            self.info_space_group.setText("N/A")
-            self.info_crystal_system.setText("N/A")
-            self.info_formula.setText("N/A")
-            self.info_r1.setText("N/A")
-            self.info_wr2.setText("N/A")
-            self.info_goof.setText("N/A")
+            all_info_labels = [
+                self.info_formula, self.info_space_group, self.info_crystal_system,
+                self.info_cell_a, self.info_cell_b, self.info_cell_c,
+                self.info_cell_alpha, self.info_cell_beta, self.info_cell_gamma,
+                self.info_volume, self.info_z, self.info_z_prime,
+                self.info_density, self.info_mu, self.info_f000,
+                self.info_temp, self.info_wavelength, self.info_crystal_size,
+                self.info_theta_range, self.info_hkl_ranges, self.info_reflns_collected,
+                self.info_reflns_unique, self.info_r_int, self.info_completeness,
+                self.info_refinement_method, self.info_num_reflns, self.info_num_params,
+                self.info_num_restraints, self.info_goof, self.info_r1,
+                self.info_wr2, self.info_r1_all, self.info_wr2_all,
+                self.info_max_shift, self.info_flack, self.info_hooft,
+                self.info_diff_peak_hole
+            ]
+            for lbl in all_info_labels:
+                lbl.setText("N/A")
             self.simulate_xrd_btn.setEnabled(False)
             return
             
         s = self.structure
+        self.info_formula.setText(s.formula or "N/A")
         self.info_space_group.setText(s.space_group or "N/A")
         self.info_crystal_system.setText(s.crystal_system or "N/A")
-        self.info_formula.setText(s.formula or "N/A")
-        self.info_r1.setText(s.r1 or "N/A")
-        self.info_wr2.setText(s.wr2 or "N/A")
+        self.info_cell_a.setText(s.cell_a_str or (f"{s.cell_lengths[0]:.4f}" if s.cell_lengths else "N/A"))
+        self.info_cell_b.setText(s.cell_b_str or (f"{s.cell_lengths[1]:.4f}" if s.cell_lengths else "N/A"))
+        self.info_cell_c.setText(s.cell_c_str or (f"{s.cell_lengths[2]:.4f}" if s.cell_lengths else "N/A"))
+        self.info_cell_alpha.setText(s.cell_alpha_str or (f"{s.cell_angles[0]:.3f}" if s.cell_angles else "N/A"))
+        self.info_cell_beta.setText(s.cell_beta_str or (f"{s.cell_angles[1]:.3f}" if s.cell_angles else "N/A"))
+        self.info_cell_gamma.setText(s.cell_gamma_str or (f"{s.cell_angles[2]:.3f}" if s.cell_angles else "N/A"))
+        self.info_volume.setText(s.volume or "N/A")
+        self.info_z.setText(s.z or "N/A")
+        self.info_z_prime.setText(s.z_prime or "N/A")
+        self.info_density.setText(s.density or "N/A")
+        self.info_mu.setText(s.mu or "N/A")
+        self.info_f000.setText(s.f000 or "N/A")
+        
+        self.info_temp.setText(s.temp or "N/A")
+        self.info_wavelength.setText(s.wavelength or "N/A")
+        self.info_crystal_size.setText(s.crystal_size or "N/A")
+        self.info_theta_range.setText(s.theta_range or "N/A")
+        self.info_hkl_ranges.setText(s.hkl_ranges or "N/A")
+        self.info_reflns_collected.setText(s.reflns_collected or "N/A")
+        self.info_reflns_unique.setText(s.reflns_unique or "N/A")
+        self.info_r_int.setText(s.r_int or "N/A")
+        self.info_completeness.setText(s.completeness or "N/A")
+        
+        self.info_refinement_method.setText(s.refinement_method or "N/A")
+        self.info_num_reflns.setText(s.num_reflns or "N/A")
+        self.info_num_params.setText(s.num_params or "N/A")
+        self.info_num_restraints.setText(s.num_restraints or "N/A")
         self.info_goof.setText(s.goof or "N/A")
+        self.info_r1.setText(s.r1_gt or s.r1 or "N/A")
+        self.info_wr2.setText(s.wr2_gt or s.wr2 or "N/A")
+        self.info_r1_all.setText(s.r1_all or "N/A")
+        self.info_wr2_all.setText(s.wr2_all or "N/A")
+        self.info_max_shift.setText(s.max_shift or "N/A")
+        self.info_flack.setText(s.flack or "N/A")
+        self.info_hooft.setText(s.hooft or "N/A")
+        self.info_diff_peak_hole.setText(s.diff_peak_hole or "N/A")
+        
         self.simulate_xrd_btn.setEnabled(True)
 
     def _simulate_powder_pattern(self):
@@ -871,21 +1027,8 @@ class CifViewerWidget(QWidget):
                 atom for atom in self.structure.atoms
                 if atom.disorder_group is None or atom.disorder_group == selected_key or atom.disorder_key == selected_key
             ]
-            from .parser import CifStructure
-            structure_to_render = CifStructure(
-                name=self.structure.name,
-                cell_lengths=self.structure.cell_lengths,
-                cell_angles=self.structure.cell_angles,
-                lattice=self.structure.lattice,
-                atoms=tuple(filtered_atoms),
-                u_cart=self.structure.u_cart,
-                space_group=self.structure.space_group,
-                crystal_system=self.structure.crystal_system,
-                formula=self.structure.formula,
-                r1=self.structure.r1,
-                wr2=self.structure.wr2,
-                goof=self.structure.goof
-            )
+            import dataclasses
+            structure_to_render = dataclasses.replace(self.structure, atoms=tuple(filtered_atoms))
 
         atoms, bonds = expand_supercell(
             structure_to_render,

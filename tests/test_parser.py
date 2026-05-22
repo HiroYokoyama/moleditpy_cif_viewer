@@ -466,5 +466,67 @@ C3 C 0.3 0.3 0.3 0.05 Uani 1.0 1 d . . . . .
     assert atoms_map["C3"].disorder_group is None
 
 
+def test_parse_cif_extended_metadata():
+    cif_content = """
+data_metadata_test
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta  90
+_cell_angle_gamma 90
+_cell_formula_units_z 4
+_cell_formula_units_zprime 1.5
+_refine_absolute_configuration_flack 0.02(5)
+_refine_absolute_configuration_hooft 0.03(4)
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    struct = parse_cif(cif_content)
+    assert struct.z == "4"
+    assert struct.z_prime == "1.5"
+    assert struct.flack == "0.02(5)"
+    assert struct.hooft == "0.03(4)"
+
+
+def test_parse_cif_file_pymatgen_extended_metadata(tmp_path):
+    cif_content = """
+data_metadata_test
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta  90
+_cell_angle_gamma 90
+_cell_formula_units_z 4
+_cell_formula_units_zprime 1.5
+_refine_absolute_configuration_flack 0.02(5)
+_refine_absolute_configuration_hooft 0.03(4)
+loop_
+  _atom_site_label
+  _atom_site_type_symbol
+  _atom_site_fract_x
+  _atom_site_fract_y
+  _atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    cif_file = tmp_path / "metadata_test.cif"
+    cif_file.write_text(cif_content, encoding="utf-8")
+    from cif_viewer.parser import parse_cif_file_pymatgen
+    structures = parse_cif_file_pymatgen(str(cif_file))
+    assert len(structures) == 1
+    struct = structures[0]
+    assert struct.z == "4"
+    assert struct.z_prime == "1.5"
+    assert struct.flack == "0.02(5)"
+    assert struct.hooft == "0.03(4)"
+
+
+
 
 
