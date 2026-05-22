@@ -478,7 +478,7 @@ _cell_angle_gamma 90
 _cell_formula_units_z 4
 _cell_formula_units_zprime 1.5
 _refine_absolute_configuration_flack 0.02(5)
-_refine_absolute_configuration_hooft 0.03(4)
+_space_group_it_number 14
 loop_
   _atom_site_label
   _atom_site_type_symbol
@@ -491,7 +491,7 @@ C1 C 0.1 0.1 0.1
     assert struct.z == "4"
     assert struct.z_prime == "1.5"
     assert struct.flack == "0.02(5)"
-    assert struct.hooft == "0.03(4)"
+    assert struct.space_group_number == "14"
 
 
 def test_parse_cif_file_pymatgen_extended_metadata(tmp_path):
@@ -505,8 +505,12 @@ _cell_angle_beta  90
 _cell_angle_gamma 90
 _cell_formula_units_z 4
 _cell_formula_units_zprime 1.5
-_refine_absolute_configuration_flack 0.02(5)
-_refine_absolute_configuration_hooft 0.03(4)
+_refine_ls_abs_structure_Flack 0.02(5)
+_space_group_it_number 14
+_refine_ls_R_factor_all 0.0665
+_refine_ls_R_factor_gt 0.0624
+_refine_ls_wR_factor_gt 0.1760
+_refine_ls_wR_factor_ref 0.1798
 loop_
   _atom_site_label
   _atom_site_type_symbol
@@ -524,7 +528,12 @@ C1 C 0.1 0.1 0.1
     assert struct.z == "4"
     assert struct.z_prime == "1.5"
     assert struct.flack == "0.02(5)"
-    assert struct.hooft == "0.03(4)"
+    assert struct.space_group_number == "14"
+    assert struct.r1_all == "0.0665"
+    assert struct.r1_gt == "0.0624"
+    assert struct.wr2_gt == "0.1760"
+    assert struct.wr2_all == "0.1798"
+
 
 
 

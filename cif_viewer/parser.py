@@ -40,6 +40,7 @@ class CifStructure:
     atoms: Tuple[CifAtom, ...]
     u_cart: Optional[np.ndarray] = None
     space_group: Optional[str] = None
+    space_group_number: Optional[str] = None
     crystal_system: Optional[str] = None
     formula: Optional[str] = None
     r1: Optional[str] = None
@@ -78,7 +79,6 @@ class CifStructure:
     wr2_all: Optional[str] = None
     z_prime: Optional[str] = None
     flack: Optional[str] = None
-    hooft: Optional[str] = None
 
 
 
@@ -107,9 +107,11 @@ def parse_cif_file(path: str) -> CifStructure:
 
 
 def _get_first_tag_value(block_data, keys: List[str]) -> Optional[str]:
+    lower_map = {k.lower(): k for k in block_data.keys()}
     for key in keys:
-        if key in block_data:
-            vals = block_data[key]
+        key_lower = key.lower()
+        if key_lower in lower_map:
+            vals = block_data[lower_map[key_lower]]
             if vals is not None:
                 val = vals[0] if isinstance(vals, (list, tuple)) else vals
                 cleaned = str(val).strip().strip("'\"")
@@ -118,7 +120,7 @@ def _get_first_tag_value(block_data, keys: List[str]) -> Optional[str]:
     return None
 
 
-def _extract_metadata(get_val) -> Dict[str, Optional[str]]:
+def _extract_metadata(get_val, num_symops: Optional[int] = None) -> Dict[str, Optional[str]]:
     c_max = get_val(["_exptl_crystal_size_max"])
     c_mid = get_val(["_exptl_crystal_size_mid"])
     c_min = get_val(["_exptl_crystal_size_min"])
@@ -164,8 +166,21 @@ def _extract_metadata(get_val) -> Dict[str, Optional[str]]:
         "_cell_formula_units_zprime",
         "_cell_formula_units_z_prime"
     ])
-    flack = get_val(["_refine_absolute_configuration_flack"])
-    hooft = get_val(["_refine_absolute_configuration_hooft"])
+    if not z_prime and z and num_symops:
+        try:
+            z_val = parse_cif_number(z)
+            calc_z_prime = z_val / num_symops
+            if calc_z_prime.is_integer():
+                z_prime = str(int(calc_z_prime))
+            else:
+                z_prime = f"{calc_z_prime:.4f}".rstrip("0").rstrip(".")
+        except Exception:
+            pass
+
+    flack = get_val([
+        "_refine_absolute_configuration_flack",
+        "_refine_ls_abs_structure_Flack"
+    ])
 
     return {
         "cell_a_str": get_val(["_cell_length_a"]),
@@ -196,13 +211,42 @@ def _extract_metadata(get_val) -> Dict[str, Optional[str]]:
         "max_shift": get_val(["_refine_ls_shift/su_max", "_refine_ls_shift/esd_max"]),
         "diff_peak_hole": diff_peak_hole,
         "flack": flack,
-        "hooft": hooft,
         "r1_gt": get_val(["_refine_ls_r_factor_gt", "_refine_ls_r_factor_obs"]),
         "wr2_gt": get_val(["_refine_ls_wr_factor_gt"]),
         "r1_all": get_val(["_refine_ls_r_factor_all"]),
         "wr2_all": get_val(["_refine_ls_wr_factor_all", "_refine_ls_wr_factor_ref"]),
     }
 
+
+
+def _count_symops_from_block_data(block_data_lower) -> int:
+    for key in [
+        "_space_group_symop_operation_xyz",
+        "_space_group_symop.operation_xyz",
+        "_symmetry_equiv_pos_as_xyz",
+        "_symmetry.equiv_pos_as_xyz"
+    ]:
+        if key in block_data_lower:
+            vals = block_data_lower[key]
+            if isinstance(vals, (list, tuple)):
+                return len(vals)
+            elif vals is not None:
+                return 1
+    return 0
+
+
+def _count_symops_from_loops(loops) -> int:
+    for headers, rows in loops:
+        for h in headers:
+            h_low = h.lower()
+            if h_low in {
+                "_space_group_symop_operation_xyz",
+                "_space_group_symop.operation_xyz",
+                "_symmetry_equiv_pos_as_xyz",
+                "_symmetry.equiv_pos_as_xyz"
+            }:
+                return len(rows)
+    return 0
 
 
 def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
@@ -216,8 +260,24 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
             if struct is None:
                 continue
                 
+            block_data_lower = {k.lower(): v for k, v in block.data.items()}
+            
+            # Get spacegroup symmetry operations
+            symops = []
+            try:
+                symops = parser.get_symops(block)
+            except Exception:
+                pass
+            if not symops:
+                try:
+                    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                    sga = SpacegroupAnalyzer(struct)
+                    symops = sga.get_space_group_operations()
+                except Exception:
+                    pass
+
             label_to_adp = {}
-            if "_atom_site_aniso_label" in block.data:
+            if "_atom_site_aniso_label" in block_data_lower:
                 aniso_loop = None
                 for loop in block.loops:
                     if any("aniso" in c.lower() for c in loop):
@@ -240,7 +300,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                                 is_b = True
 
                     if label_col and "11" in val_cols:
-                        labels_list = block.data[label_col]
+                        labels_list = block_data_lower[label_col.lower()]
                         num_entries = len(labels_list)
                         
                         for i in range(num_entries):
@@ -250,8 +310,8 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                                 for suffix in ["11", "22", "33", "12", "13", "23"]:
                                     col = val_cols.get(suffix)
                                     val = 0.0
-                                    if col and i < len(block.data[col]):
-                                        val = parse_cif_number(block.data[col][i])
+                                    if col and i < len(block_data_lower[col.lower()]):
+                                        val = parse_cif_number(block_data_lower[col.lower()][i])
                                         if is_b:
                                             val = val / (8.0 * math.pi * math.pi)
                                     u_vals[suffix] = val
@@ -272,11 +332,11 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
 
                 # Build mapping of clean labels to their original asymmetric unit fractional coordinates
                 label_to_frac_orig = {}
-                if "_atom_site_label" in block.data:
-                    labels = block.data["_atom_site_label"]
-                    fx = block.data.get("_atom_site_fract_x", [])
-                    fy = block.data.get("_atom_site_fract_y", [])
-                    fz = block.data.get("_atom_site_fract_z", [])
+                if "_atom_site_label" in block_data_lower:
+                    labels = block_data_lower["_atom_site_label"]
+                    fx = block_data_lower.get("_atom_site_fract_x", [])
+                    fy = block_data_lower.get("_atom_site_fract_y", [])
+                    fz = block_data_lower.get("_atom_site_fract_z", [])
                     for idx_lbl, lbl in enumerate(labels):
                         try:
                             clean_lbl = str(lbl).strip().strip("'\"")
@@ -286,20 +346,6 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                             label_to_frac_orig[clean_lbl] = np.array([x, y, z])
                         except Exception:
                             pass
-
-                # Get spacegroup symmetry operations
-                symops = []
-                try:
-                    symops = parser.get_symops(block)
-                except Exception:
-                    pass
-                if not symops:
-                    try:
-                        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-                        sga = SpacegroupAnalyzer(struct)
-                        symops = sga.get_space_group_operations()
-                    except Exception:
-                        pass
 
                 u_cart_list = []
                 for site in struct:
@@ -350,7 +396,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
             label_key = None
             group_key = None
             assembly_key = None
-            for k in block.data.keys():
+            for k in block_data_lower.keys():
                 k_norm = k.lower().lstrip("_")
                 if k_norm == "atom_site_label":
                     label_key = k
@@ -360,9 +406,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                     assembly_key = k
 
             if label_key is not None:
-                labels = block.data[label_key]
-                groups = block.data[group_key] if group_key is not None else []
-                assemblies = block.data[assembly_key] if assembly_key is not None else []
+                labels = block_data_lower[label_key]
+                groups = block_data_lower[group_key] if group_key is not None else []
+                assemblies = block_data_lower[assembly_key] if assembly_key is not None else []
                 for idx_lbl, lbl in enumerate(labels):
                     try:
                         clean_lbl = str(lbl).strip().strip("'\"")
@@ -377,7 +423,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                         pass
 
             # Extract cell metadata and refinement factors
-            space_group = _get_first_tag_value(block.data, [
+            space_group = _get_first_tag_value(block_data_lower, [
                 "_space_group_name_h-m_alt",
                 "_symmetry_space_group_name_h-m",
                 "_space_group.symmetry_space_group_name_h-m"
@@ -387,8 +433,27 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                     space_group = struct.get_space_group_info()[0]
                 except Exception:
                     pass
+
+            space_group_number = _get_first_tag_value(block_data_lower, [
+                "_space_group_it_number",
+                "_space_group.it_number",
+                "_symmetry_int_tables_number",
+                "_symmetry.int_tables_number"
+            ])
+            if not space_group_number:
+                try:
+                    space_group_number = str(struct.get_space_group_info()[1])
+                except Exception:
+                    pass
+            if not space_group_number:
+                try:
+                    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                    sga = SpacegroupAnalyzer(struct)
+                    space_group_number = str(sga.get_space_group_number())
+                except Exception:
+                    pass
             
-            crystal_system = _get_first_tag_value(block.data, [
+            crystal_system = _get_first_tag_value(block_data_lower, [
                 "_space_group_crystal_system",
                 "_symmetry_cell_setting"
             ])
@@ -400,7 +465,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 except Exception:
                     pass
             
-            formula = _get_first_tag_value(block.data, [
+            formula = _get_first_tag_value(block_data_lower, [
                 "_chemical_formula_sum",
                 "_chemical_formula_structural",
                 "_chemical_formula_moiety"
@@ -411,22 +476,26 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 except Exception:
                     pass
 
-            r1 = _get_first_tag_value(block.data, [
+            r1 = _get_first_tag_value(block_data_lower, [
                 "_refine_ls_r_factor_gt",
                 "_refine_ls_r_factor_obs",
                 "_refine_ls_r_factor_all"
             ])
-            wr2 = _get_first_tag_value(block.data, [
+            wr2 = _get_first_tag_value(block_data_lower, [
                 "_refine_ls_wr_factor_ref",
                 "_refine_ls_wr_factor_gt",
                 "_refine_ls_wr_factor_all"
             ])
-            goof = _get_first_tag_value(block.data, [
+            goof = _get_first_tag_value(block_data_lower, [
                 "_refine_ls_goodness_of_fit_ref",
                 "_refine_ls_goodness_of_fit_all"
             ])
 
-            metadata = _extract_metadata(lambda keys: _get_first_tag_value(block.data, keys))
+            num_symops = len(symops) if symops else _count_symops_from_block_data(block_data_lower)
+            if num_symops == 0:
+                num_symops = None
+
+            metadata = _extract_metadata(lambda keys: _get_first_tag_value(block_data_lower, keys), num_symops=num_symops)
 
             cif_struct = _structure_from_pymatgen(
                 struct,
@@ -434,6 +503,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 u_cart_data,
                 label_to_disorder=label_to_disorder,
                 space_group=space_group,
+                space_group_number=space_group_number,
                 crystal_system=crystal_system,
                 formula=formula,
                 r1=r1,
@@ -455,6 +525,7 @@ def _structure_from_pymatgen(
     u_cart: Optional[np.ndarray] = None,
     label_to_disorder: Optional[Dict[str, Tuple[Optional[str], Optional[str]]]] = None,
     space_group: Optional[str] = None,
+    space_group_number: Optional[str] = None,
     crystal_system: Optional[str] = None,
     formula: Optional[str] = None,
     r1: Optional[str] = None,
@@ -498,6 +569,7 @@ def _structure_from_pymatgen(
         atoms=tuple(atoms),
         u_cart=u_cart,
         space_group=space_group,
+        space_group_number=space_group_number,
         crystal_system=crystal_system,
         formula=formula,
         r1=r1,
@@ -544,6 +616,12 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
         "_symmetry_space_group_name_h-m",
         "_space_group.symmetry_space_group_name_h-m"
     ])
+    space_group_number = _get_tag_value_dict(tags, [
+        "_space_group_it_number",
+        "_space_group.it_number",
+        "_symmetry_int_tables_number",
+        "_symmetry.int_tables_number"
+    ])
     crystal_system = _get_tag_value_dict(tags, [
         "_space_group_crystal_system",
         "_symmetry_cell_setting"
@@ -568,11 +646,16 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
         "_refine_ls_goodness_of_fit_all"
     ])
 
-    metadata = _extract_metadata(lambda keys: _get_tag_value_dict(tags, keys))
+    num_symops = _count_symops_from_loops(loops)
+    if num_symops == 0:
+        num_symops = None
+
+    metadata = _extract_metadata(lambda keys: _get_tag_value_dict(tags, keys), num_symops=num_symops)
 
     return CifStructure(
         structure_name, lengths, angles, lattice, tuple(atoms),
         space_group=space_group,
+        space_group_number=space_group_number,
         crystal_system=crystal_system,
         formula=formula,
         r1=r1,

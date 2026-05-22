@@ -194,6 +194,7 @@ class CifViewerWidget(QWidget):
         
         self.info_formula = QLabel("N/A")
         self.info_space_group = QLabel("N/A")
+        self.info_space_group_number = QLabel("N/A")
         self.info_crystal_system = QLabel("N/A")
         self.info_cell_a = QLabel("N/A")
         self.info_cell_b = QLabel("N/A")
@@ -210,6 +211,7 @@ class CifViewerWidget(QWidget):
         
         layout_cell.addRow("Formula:", self.info_formula)
         layout_cell.addRow("Space Group:", self.info_space_group)
+        layout_cell.addRow("Space Group No.:", self.info_space_group_number)
         layout_cell.addRow("Crystal System:", self.info_crystal_system)
         layout_cell.addRow("a (Å):", self.info_cell_a)
         layout_cell.addRow("b (Å):", self.info_cell_b)
@@ -267,7 +269,6 @@ class CifViewerWidget(QWidget):
         self.info_wr2_all = QLabel("N/A")
         self.info_max_shift = QLabel("N/A")
         self.info_flack = QLabel("N/A")
-        self.info_hooft = QLabel("N/A")
         self.info_diff_peak_hole = QLabel("N/A")
         
         layout_refine.addRow("Refinement Method:", self.info_refinement_method)
@@ -281,12 +282,11 @@ class CifViewerWidget(QWidget):
         layout_refine.addRow("wR2 (all data):", self.info_wr2_all)
         layout_refine.addRow("Max Shift/s.u.:", self.info_max_shift)
         layout_refine.addRow("Flack Parameter:", self.info_flack)
-        layout_refine.addRow("Hooft Parameter:", self.info_hooft)
         layout_refine.addRow("Diff Peak/Hole (e/Å³):", self.info_diff_peak_hole)
         
         # Enable text selection
         all_info_labels = [
-            self.info_formula, self.info_space_group, self.info_crystal_system,
+            self.info_formula, self.info_space_group, self.info_space_group_number, self.info_crystal_system,
             self.info_cell_a, self.info_cell_b, self.info_cell_c,
             self.info_cell_alpha, self.info_cell_beta, self.info_cell_gamma,
             self.info_volume, self.info_z, self.info_z_prime,
@@ -297,7 +297,7 @@ class CifViewerWidget(QWidget):
             self.info_refinement_method, self.info_num_reflns, self.info_num_params,
             self.info_num_restraints, self.info_goof, self.info_r1,
             self.info_wr2, self.info_r1_all, self.info_wr2_all,
-            self.info_max_shift, self.info_flack, self.info_hooft,
+            self.info_max_shift, self.info_flack,
             self.info_diff_peak_hole
         ]
         for lbl in all_info_labels:
@@ -718,7 +718,7 @@ class CifViewerWidget(QWidget):
     def _update_info_ui(self):
         if self.structure is None:
             all_info_labels = [
-                self.info_formula, self.info_space_group, self.info_crystal_system,
+                self.info_formula, self.info_space_group, self.info_space_group_number, self.info_crystal_system,
                 self.info_cell_a, self.info_cell_b, self.info_cell_c,
                 self.info_cell_alpha, self.info_cell_beta, self.info_cell_gamma,
                 self.info_volume, self.info_z, self.info_z_prime,
@@ -729,7 +729,7 @@ class CifViewerWidget(QWidget):
                 self.info_refinement_method, self.info_num_reflns, self.info_num_params,
                 self.info_num_restraints, self.info_goof, self.info_r1,
                 self.info_wr2, self.info_r1_all, self.info_wr2_all,
-                self.info_max_shift, self.info_flack, self.info_hooft,
+                self.info_max_shift, self.info_flack,
                 self.info_diff_peak_hole
             ]
             for lbl in all_info_labels:
@@ -740,6 +740,7 @@ class CifViewerWidget(QWidget):
         s = self.structure
         self.info_formula.setText(s.formula or "N/A")
         self.info_space_group.setText(s.space_group or "N/A")
+        self.info_space_group_number.setText(s.space_group_number or "N/A")
         self.info_crystal_system.setText(s.crystal_system or "N/A")
         self.info_cell_a.setText(s.cell_a_str or (f"{s.cell_lengths[0]:.4f}" if s.cell_lengths else "N/A"))
         self.info_cell_b.setText(s.cell_b_str or (f"{s.cell_lengths[1]:.4f}" if s.cell_lengths else "N/A"))
@@ -775,7 +776,6 @@ class CifViewerWidget(QWidget):
         self.info_wr2_all.setText(s.wr2_all or "N/A")
         self.info_max_shift.setText(s.max_shift or "N/A")
         self.info_flack.setText(s.flack or "N/A")
-        self.info_hooft.setText(s.hooft or "N/A")
         self.info_diff_peak_hole.setText(s.diff_peak_hole or "N/A")
         
         self.simulate_xrd_btn.setEnabled(True)

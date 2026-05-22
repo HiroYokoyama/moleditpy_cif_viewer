@@ -1067,6 +1067,7 @@ def test_cif_viewer_widget_disorder_and_info(qtbot, tmp_path):
     
     cif_content = """data_disorder_info
 _space_group_name_h-m_alt 'P 21/c'
+_space_group_it_number 14
 _space_group_crystal_system monoclinic
 _chemical_formula_sum 'C10 H15 N O'
 _cell_length_a 10.0
@@ -1079,7 +1080,6 @@ _cell_volume 1000.0
 _cell_formula_units_z 4
 _cell_formula_units_zprime 1.5
 _refine_absolute_configuration_flack 0.02(5)
-_refine_absolute_configuration_hooft 0.03(4)
 _exptl_crystal_density_diffrn 1.25
 _exptl_absorpt_coefficient_mu 0.12
 _exptl_crystal_f_000 240
@@ -1145,6 +1145,7 @@ C3 C 0.3 0.3 0.3 . .
     # 1. Verify Info Tab Labels
     assert widget.info_formula.text() == "C10 H15 N O"
     assert widget.info_space_group.text() == "P 21/c"
+    assert widget.info_space_group_number.text() == "14"
     assert widget.info_crystal_system.text() == "monoclinic"
     assert widget.info_cell_a.text() == "10.0"
     assert widget.info_cell_b.text() == "10.0"
@@ -1180,7 +1181,6 @@ C3 C 0.3 0.3 0.3 . .
     assert widget.info_wr2_all.text() == "0.130"
     assert widget.info_max_shift.text() == "0.002"
     assert widget.info_flack.text() == "0.02(5)"
-    assert widget.info_hooft.text() == "0.03(4)"
     assert widget.info_diff_peak_hole.text() == "0.25 / -0.25"
     
     assert widget.simulate_xrd_btn.isEnabled() is True
