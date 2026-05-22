@@ -108,6 +108,18 @@ class _FakeViewerWidget:
         self.cleared = True
 
 
+class FakeSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args, **kwargs):
+        for cb in self._callbacks:
+            cb(*args, **kwargs)
+
+
 class _FakeDockWidget:
     def __init__(self, title, parent):
         self.title = title
@@ -115,6 +127,7 @@ class _FakeDockWidget:
         self._widget = None
         self.shown = False
         self.raised = False
+        self.visibilityChanged = FakeSignal()
 
     def setAllowedAreas(self, areas):
         self.allowed_areas = areas
@@ -127,9 +140,17 @@ class _FakeDockWidget:
 
     def show(self):
         self.shown = True
+        self.visibilityChanged.emit(True)
+
+    def hide(self):
+        self.shown = False
+        self.visibilityChanged.emit(False)
 
     def raise_(self):
         self.raised = True
+
+    def isVisible(self):
+        return self.shown
 
 
 def _install_fake_qt(monkeypatch):
@@ -476,6 +497,59 @@ def test_draw_molecule_3d_hook_and_overlays(monkeypatch):
     
     # Verify that clear_view was called
     assert widget.cleared is True
+
+
+def test_draw_molecule_3d_hook_visibility_toggling(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    
+    class MockViewerWidget:
+        def __init__(self, dock, context):
+            self.dock = dock
+            self.context = context
+            self.structure = "dummy_structure"
+            
+    fake_viewer = types.ModuleType("cif_viewer.viewer")
+    fake_viewer.CifViewerWidget = MockViewerWidget
+    monkeypatch.setitem(sys.modules, "cif_viewer.viewer", fake_viewer)
+    
+    context = StubContext()
+    
+    class FakeView3DManager:
+        def __init__(self):
+            self.drawn_molecule = None
+        def draw_molecule_3d(self, mol):
+            self.drawn_molecule = mol
+            
+    vm = FakeView3DManager()
+    context.main_window.view_3d_manager = vm
+    
+    initialize(context)
+    
+    # Hook shouldn't be active initially
+    assert getattr(vm, "_cif_viewer_hooked", False) is False
+    
+    # Open panel (shows dock)
+    show_panel_action = context.menu_actions[0][1]
+    show_panel_action()
+    
+    # Hook should now be active
+    assert vm._cif_viewer_hooked is True
+    assert vm.draw_molecule_3d != FakeView3DManager.draw_molecule_3d
+    
+    # Hide the dock panel
+    dock = context.get_window("cif_viewer_panel")
+    dock.hide()
+    
+    # Hook should be reverted
+    assert vm._cif_viewer_hooked is False
+    assert vm.draw_molecule_3d == vm._orig_draw_molecule_3d
+    
+    # Show the dock panel again
+    dock.show()
+    
+    # Hook should be active again
+    assert vm._cif_viewer_hooked is True
+    assert vm.draw_molecule_3d != vm._orig_draw_molecule_3d
 
 
 def test_cif_viewer_widget_initialization(qtbot):

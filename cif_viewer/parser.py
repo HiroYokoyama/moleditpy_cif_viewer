@@ -104,19 +104,88 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                             except Exception:
                                 pass
             
-            adp_data = None
+            u_cart_data = None
             if label_to_adp:
-                u_cif_list = []
-                for site in struct:
-                    lbl = getattr(site, "label", "")
-                    if lbl in label_to_adp:
-                        u_cif_list.append(label_to_adp[lbl])
-                    else:
-                        u_cif_list.append([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-                if any(any(val != 0.0 for val in row) for row in u_cif_list):
-                    adp_data = np.array(u_cif_list, dtype=float)
+                A = struct.lattice.matrix.T
+                A_inv = np.linalg.inv(A)
+                N = np.diag([np.linalg.norm(x) for x in A_inv])
 
-            cif_struct = _structure_from_pymatgen(struct, name or "Structure", adp_data)
+                # Build mapping of clean labels to their original asymmetric unit fractional coordinates
+                label_to_frac_orig = {}
+                if "_atom_site_label" in block.data:
+                    labels = block.data["_atom_site_label"]
+                    fx = block.data.get("_atom_site_fract_x", [])
+                    fy = block.data.get("_atom_site_fract_y", [])
+                    fz = block.data.get("_atom_site_fract_z", [])
+                    for idx_lbl, lbl in enumerate(labels):
+                        try:
+                            clean_lbl = str(lbl).strip().strip("'\"")
+                            x = parse_cif_number(fx[idx_lbl])
+                            y = parse_cif_number(fy[idx_lbl])
+                            z = parse_cif_number(fz[idx_lbl])
+                            label_to_frac_orig[clean_lbl] = np.array([x, y, z])
+                        except Exception:
+                            pass
+
+                # Get spacegroup symmetry operations
+                symops = []
+                try:
+                    symops = parser.get_symops(block)
+                except Exception:
+                    pass
+                if not symops:
+                    try:
+                        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                        sga = SpacegroupAnalyzer(struct)
+                        symops = sga.get_space_group_operations()
+                    except Exception:
+                        pass
+
+                u_cart_list = []
+                for site in struct:
+                    lbl = str(getattr(site, "label", "")).strip().strip("'\"")
+                    if lbl in label_to_adp:
+                        u_orig_vals = list(label_to_adp[lbl])
+                        frac_orig = label_to_frac_orig.get(lbl)
+                        
+                        u11, u22, u33, u23, u13, u12 = u_orig_vals
+                        U_frac_orig = np.array([
+                            [u11, u12, u13],
+                            [u12, u22, u23],
+                            [u13, u23, u33]
+                        ], dtype=float)
+                        
+                        # Convert original U_frac to Cartesian U_cart
+                        mat_ustar = N @ U_frac_orig @ N
+                        U_cart_orig = A @ mat_ustar @ A.T
+                        
+                        if frac_orig is not None and symops:
+                            frac_site = site.frac_coords
+                            matched_op = None
+                            for op in symops:
+                                res = op.operate(frac_orig)
+                                diff = res - frac_site
+                                diff_mod = diff - np.round(diff)
+                                if np.allclose(diff_mod, 0.0, atol=1e-4):
+                                    matched_op = op
+                                    break
+                            
+                            if matched_op is not None:
+                                R = matched_op.rotation_matrix
+                                R_cart = A @ R @ A_inv
+                                U_cart_site = R_cart @ U_cart_orig @ R_cart.T
+                            else:
+                                U_cart_site = U_cart_orig
+                        else:
+                            U_cart_site = U_cart_orig
+                        u_cart_list.append(U_cart_site)
+                    else:
+                        u_cart_list.append(np.zeros((3, 3)))
+                
+                if u_cart_list and any(not np.allclose(m, 0.0) for m in u_cart_list):
+                    u_cart_data = np.array(u_cart_list, dtype=float)
+
+            cif_struct = _structure_from_pymatgen(struct, name or "Structure", u_cart_data)
             structures.append(cif_struct)
         except Exception:
             pass
@@ -124,7 +193,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
     return structures
 
 
-def _structure_from_pymatgen(struct, name: str, adps: Optional[np.ndarray] = None) -> CifStructure:
+def _structure_from_pymatgen(struct, name: str, u_cart: Optional[np.ndarray] = None) -> CifStructure:
     cell_lengths = struct.lattice.lengths
     cell_angles = struct.lattice.angles
     lattice = struct.lattice.matrix
@@ -138,15 +207,6 @@ def _structure_from_pymatgen(struct, name: str, adps: Optional[np.ndarray] = Non
         occupancy = getattr(site, "occupancy", 1.0)
         atoms.append(CifAtom(label, element, fract, cart, occupancy))
         
-    u_cart = None
-    if adps is not None:
-        try:
-            from pymatgen.phonon.thermal_displacements import ThermalDisplacementMatrices
-            tdm = ThermalDisplacementMatrices.from_Ucif(adps, struct)
-            u_cart = tdm.thermal_displacement_matrix_cart_matrixform
-        except Exception:
-            pass
-            
     return CifStructure(
         name=name,
         cell_lengths=(float(cell_lengths[0]), float(cell_lengths[1]), float(cell_lengths[2])),

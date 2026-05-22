@@ -1,5 +1,5 @@
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.3.0"
+PLUGIN_VERSION = "0.4.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DESCRIPTION = (
     "Visualization-only CIF crystal structure viewer with unit-cell and "
@@ -11,7 +11,34 @@ WINDOW_ID = "cif_viewer_panel"
 
 
 def initialize(context):
-    """Register the CIF viewer with MoleditPy."""
+    def apply_hook(vm, orig_draw):
+        import types
+        if getattr(vm, "_cif_viewer_hooked", False):
+            return
+        
+        def hooked_draw(self_vm, mol, *args, **kwargs):
+            orig_draw(mol, *args, **kwargs)
+            dock_widget = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
+            if dock_widget is not None and dock_widget.widget() is not None:
+                w = dock_widget.widget()
+                if mol is None or not hasattr(mol, "HasProp") or not mol.HasProp("_from_cif_viewer"):
+                    w.clear_view()
+                    return
+                if getattr(w, "structure", None) is not None and dock_widget.isVisible():
+                    try:
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(50, w.render_overlays_only)
+                    except Exception:
+                        w.render_overlays_only()
+
+        vm.draw_molecule_3d = types.MethodType(hooked_draw, vm)
+        vm._cif_viewer_hooked = True
+
+    def revert_hook(vm, orig_draw):
+        if not getattr(vm, "_cif_viewer_hooked", False):
+            return
+        vm.draw_molecule_3d = orig_draw
+        vm._cif_viewer_hooked = False
 
     def show_panel(file_path=None):
         from PyQt6.QtCore import Qt
@@ -20,29 +47,16 @@ def initialize(context):
         from .viewer import CifViewerWidget
 
         main_window = context.get_main_window()
-        if main_window is not None and hasattr(main_window, "view_3d_manager"):
-            vm = main_window.view_3d_manager
-            if not getattr(vm, "_cif_viewer_hooked", False):
-                vm._cif_viewer_hooked = True
-                orig_draw = vm.draw_molecule_3d
-                import types
 
-                def hooked_draw(self_vm, mol, *args, **kwargs):
-                    orig_draw(mol, *args, **kwargs)
-                    dock_widget = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
-                    if dock_widget is not None and dock_widget.widget() is not None:
-                        w = dock_widget.widget()
-                        if mol is None or not hasattr(mol, "HasProp") or not mol.HasProp("_from_cif_viewer"):
-                            w.clear_view()
-                            return
-                        if getattr(w, "structure", None) is not None and dock_widget.isVisible():
-                            try:
-                                from PyQt6.QtCore import QTimer
-                                QTimer.singleShot(50, w.render_overlays_only)
-                            except Exception:
-                                w.render_overlays_only()
-
-                vm.draw_molecule_3d = types.MethodType(hooked_draw, vm)
+        def update_hook_state(visible):
+            if main_window is not None and hasattr(main_window, "view_3d_manager"):
+                vm = main_window.view_3d_manager
+                if not hasattr(vm, "_orig_draw_molecule_3d"):
+                    vm._orig_draw_molecule_3d = vm.draw_molecule_3d
+                if visible:
+                    apply_hook(vm, vm._orig_draw_molecule_3d)
+                else:
+                    revert_hook(vm, vm._orig_draw_molecule_3d)
 
         dock = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
         if dock is None:
@@ -53,6 +67,8 @@ def initialize(context):
             )
             widget = CifViewerWidget(dock, context)
             dock.setWidget(widget)
+            dock.visibilityChanged.connect(update_hook_state)
+            
             if main_window is not None and hasattr(main_window, "addDockWidget"):
                 main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             if hasattr(context, "register_window"):
@@ -60,6 +76,7 @@ def initialize(context):
             
             dock.show()
             dock.raise_()
+            update_hook_state(dock.isVisible())
         else:
             widget = dock.widget()
             if file_path is None:
@@ -71,6 +88,7 @@ def initialize(context):
             else:
                 dock.show()
                 dock.raise_()
+            update_hook_state(dock.isVisible())
 
         if file_path:
             widget.load_cif(file_path)
