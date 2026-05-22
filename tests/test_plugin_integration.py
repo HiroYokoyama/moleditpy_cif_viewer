@@ -1121,8 +1121,8 @@ C3 C 0.3 0.3 0.3 . .
     assert widget.disorder_combo.isVisible() is True
     assert widget.disorder_combo.count() == 3
     assert widget.disorder_combo.itemText(0) == "All Parts"
-    assert widget.disorder_combo.itemText(1) == "Part A_1"
-    assert widget.disorder_combo.itemText(2) == "Part A_2"
+    assert widget.disorder_combo.itemText(1) == "Part 1"
+    assert widget.disorder_combo.itemText(2) == "Part 2"
     
     # 3. Verify render filtering
     # Index 0: All parts

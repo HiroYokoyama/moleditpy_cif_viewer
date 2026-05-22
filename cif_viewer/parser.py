@@ -867,7 +867,7 @@ def write_supercell_cif(
     if selected_disorder_key is not None:
         base_atoms = [
             atom for atom in base_atoms
-            if atom.disorder_key is None or atom.disorder_key == selected_disorder_key
+            if atom.disorder_group is None or atom.disorder_group == selected_disorder_key or atom.disorder_key == selected_disorder_key
         ]
     
     new_a = structure.cell_lengths[0] * repeat_a

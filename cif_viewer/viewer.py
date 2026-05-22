@@ -586,7 +586,7 @@ class CifViewerWidget(QWidget):
 
         keys = set()
         for atom in self.structure.atoms:
-            key = atom.disorder_key
+            key = atom.disorder_group
             if key is not None:
                 keys.add(key)
 
@@ -869,7 +869,7 @@ class CifViewerWidget(QWidget):
         if selected_key is not None:
             filtered_atoms = [
                 atom for atom in self.structure.atoms
-                if atom.disorder_key is None or atom.disorder_key == selected_key
+                if atom.disorder_group is None or atom.disorder_group == selected_key or atom.disorder_key == selected_key
             ]
             from .parser import CifStructure
             structure_to_render = CifStructure(

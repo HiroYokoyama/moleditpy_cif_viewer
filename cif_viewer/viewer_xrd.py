@@ -32,8 +32,9 @@ def make_pymatgen_structure(cif_structure, selected_disorder_key: str | None = N
     base_atoms = []
     for atom in cif_structure.atoms:
         if selected_disorder_key is not None:
-            if atom.disorder_key is not None and atom.disorder_key != selected_disorder_key:
-                continue
+            if atom.disorder_group is not None:
+                if atom.disorder_group != selected_disorder_key and atom.disorder_key != selected_disorder_key:
+                    continue
         base_atoms.append(atom)
 
     species = []
