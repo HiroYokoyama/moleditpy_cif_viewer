@@ -1382,3 +1382,151 @@ C1 C 0.1 0.1 0.1
     assert len(dialog_exec_called) == 1
 
 
+def test_powder_pattern_dialog_export_csv(qtbot, tmp_path, monkeypatch):
+    from cif_viewer.viewer_xrd import PowderPatternDialog
+    from cif_viewer.parser import parse_cif
+    from PyQt6.QtWidgets import QMessageBox, QFileDialog
+    import os
+
+    cif_content = """data_xrd
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.1 0.1
+C2 C 0.2 0.2 0.2
+"""
+    structure = parse_cif(cif_content)
+    dialog = PowderPatternDialog(structure)
+    qtbot.addWidget(dialog)
+
+    # Verify calculation has completed and populated xrd & profile properties
+    assert dialog.last_xrd is not None
+    assert len(dialog.last_xrd.x) > 0
+    assert dialog.last_profile_x is not None
+    assert dialog.last_profile_y is not None
+
+    # Mock QMessageBox to intercept the choice box
+    class MockQMessageBox:
+        StandardButton = QMessageBox.StandardButton
+        ButtonRole = QMessageBox.ButtonRole
+
+        simulated_clicked_button_name = "Simulated Profile (Curve)"
+        simulated_cancel = False
+
+        def __init__(self, parent=None):
+            self._buttons = []
+            self._clicked_btn = None
+
+        def setWindowTitle(self, title): pass
+        def setText(self, text): pass
+
+        def addButton(self, arg1, role=None):
+            self._buttons.append(arg1)
+            return arg1
+
+        def exec(self):
+            if MockQMessageBox.simulated_cancel:
+                for btn in self._buttons:
+                    if btn == QMessageBox.StandardButton.Cancel:
+                        self._clicked_btn = btn
+                        return
+            else:
+                for btn in self._buttons:
+                    if btn == MockQMessageBox.simulated_clicked_button_name:
+                        self._clicked_btn = btn
+                        return
+            self._clicked_btn = None
+
+        def clickedButton(self):
+            return self._clicked_btn
+
+        @staticmethod
+        def warning(parent, title, text): pass
+        @staticmethod
+        def information(parent, title, text): pass
+        @staticmethod
+        def critical(parent, title, text): pass
+
+    # Override QMessageBox class reference
+    monkeypatch.setattr("cif_viewer.viewer_xrd.QMessageBox", MockQMessageBox)
+
+    # 1. Export as Simulated Profile (Curve)
+    export_path_profile = tmp_path / "profile_out.csv"
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(export_path_profile), "CSV Files (*.csv)")
+    )
+
+    MockQMessageBox.simulated_clicked_button_name = "Simulated Profile (Curve)"
+    MockQMessageBox.simulated_cancel = False
+
+    dialog._export_csv()
+
+    # Verify profile file is written
+    assert export_path_profile.exists()
+    content = export_path_profile.read_text(encoding="utf-8")
+    assert "2-Theta (deg),Intensity" in content
+    # Verify we have float pairs
+    lines = content.strip().split("\n")
+    assert len(lines) > 2
+    header = lines[0]
+    first_data = lines[1].split(",")
+    float(first_data[0])
+    float(first_data[1])
+
+    # 2. Export as Bragg Peaks (Sticks)
+    export_path_sticks = tmp_path / "sticks_out.csv"
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(export_path_sticks), "CSV Files (*.csv)")
+    )
+
+    MockQMessageBox.simulated_clicked_button_name = "Bragg Peaks (Sticks)"
+    MockQMessageBox.simulated_cancel = False
+
+    dialog._export_csv()
+
+    # Verify sticks file is written
+    assert export_path_sticks.exists()
+    content_sticks = export_path_sticks.read_text(encoding="utf-8")
+    assert "2-Theta (deg),Intensity,d-spacing (A),HKL" in content_sticks
+    lines_sticks = content_sticks.strip().split("\n")
+    assert len(lines_sticks) > 1
+    # Check HKL layout: e.g. contains parentheses
+    assert "(" in lines_sticks[1] and ")" in lines_sticks[1]
+
+    # 3. Cancel Choice Dialog
+    export_path_cancelled = tmp_path / "cancelled_out.csv"
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(export_path_cancelled), "CSV Files (*.csv)")
+    )
+
+    MockQMessageBox.simulated_cancel = True
+
+    dialog._export_csv()
+    assert not export_path_cancelled.exists()
+
+    # 4. Cancel File Dialog (Choose Profile but cancel file dialog)
+    monkeypatch.setattr(
+        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: ("", "")
+    )
+    MockQMessageBox.simulated_clicked_button_name = "Simulated Profile (Curve)"
+    MockQMessageBox.simulated_cancel = False
+
+    # This shouldn't raise any exception, and should just return
+    dialog._export_csv()
+
+
+
+

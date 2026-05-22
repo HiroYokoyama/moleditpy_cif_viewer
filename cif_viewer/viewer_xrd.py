@@ -11,6 +11,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLabel,
     QWidget,
+    QFileDialog,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt
 
@@ -96,6 +98,10 @@ class PowderPatternDialog(QDialog):
         super().__init__(parent)
         self.cif_structure = cif_structure
         self.selected_disorder_key = selected_disorder_key
+        
+        self.last_xrd = None
+        self.last_profile_x = None
+        self.last_profile_y = None
         
         self.setWindowTitle("Simulate Powder Pattern (XRD)")
         self.resize(800, 600)
@@ -184,8 +190,12 @@ class PowderPatternDialog(QDialog):
         main_layout.addWidget(self.toolbar)
         main_layout.addWidget(self.canvas, 1)
         
-        # Close button at bottom right
+        # Close and Export buttons at bottom
         btn_layout = QHBoxLayout()
+        self.export_csv_btn = QPushButton("Export CSV...")
+        self.export_csv_btn.clicked.connect(self._export_csv)
+        btn_layout.addWidget(self.export_csv_btn)
+        
         btn_layout.addStretch()
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
@@ -225,6 +235,10 @@ class PowderPatternDialog(QDialog):
         self.fig.clear()
         ax = self.fig.add_subplot(111)
         
+        self.last_xrd = None
+        self.last_profile_x = None
+        self.last_profile_y = None
+        
         try:
             # Build pymatgen structure
             pm_structure = make_pymatgen_structure(self.cif_structure, self.selected_disorder_key)
@@ -243,28 +257,36 @@ class PowderPatternDialog(QDialog):
             max_theta = self.max_theta_spin.value()
             
             xrd = calculator.get_pattern(pm_structure, two_theta_range=(min_theta, max_theta))
+            self.last_xrd = xrd
             
             pattern_style = self.pattern_type_combo.currentText()
             fwhm = self.fwhm_spin.value()
             show_sticks = self.show_sticks_chk.isChecked()
             
+            # Always precompute the continuous profile on grid for potential export
+            two_thetas = np.linspace(min_theta, max_theta, 2000)
+            profile = np.zeros_like(two_thetas)
+            
+            profile_style = pattern_style
+            if profile_style == "Sticks Only":
+                profile_style = "Profile (Gaussian)"
+                
+            if profile_style == "Profile (Gaussian)":
+                sigma = fwhm / 2.35482
+                for x, y in zip(xrd.x, xrd.y):
+                    profile += y * np.exp(-0.5 * ((two_thetas - x) / sigma) ** 2)
+            elif profile_style == "Profile (Lorentzian)":
+                gamma = fwhm / 2.0
+                for x, y in zip(xrd.x, xrd.y):
+                    profile += y * (gamma ** 2) / ((two_thetas - x) ** 2 + gamma ** 2)
+            
+            if len(profile) > 0 and np.max(profile) > 0:
+                profile = (profile / np.max(profile)) * 100.0
+                
+            self.last_profile_x = two_thetas
+            self.last_profile_y = profile
+            
             if pattern_style.startswith("Profile"):
-                # Compute continuous profile on grid
-                two_thetas = np.linspace(min_theta, max_theta, 2000)
-                profile = np.zeros_like(two_thetas)
-                
-                if pattern_style == "Profile (Gaussian)":
-                    sigma = fwhm / 2.35482
-                    for x, y in zip(xrd.x, xrd.y):
-                        profile += y * np.exp(-0.5 * ((two_thetas - x) / sigma) ** 2)
-                elif pattern_style == "Profile (Lorentzian)":
-                    gamma = fwhm / 2.0
-                    for x, y in zip(xrd.x, xrd.y):
-                        profile += y * (gamma ** 2) / ((two_thetas - x) ** 2 + gamma ** 2)
-                
-                if len(profile) > 0 and np.max(profile) > 0:
-                    profile = (profile / np.max(profile)) * 100.0
-                    
                 ax.plot(two_thetas, profile, color="#1f77b4", linewidth=1.5, label="Simulated Profile")
                 ax.fill_between(two_thetas, 0, profile, color="#1f77b4", alpha=0.15)
                 
@@ -319,3 +341,62 @@ class PowderPatternDialog(QDialog):
                     ha="center", va="center", transform=ax.transAxes, color="red")
             
         self.canvas.draw()
+
+    def _export_csv(self):
+        if self.last_xrd is None or len(self.last_xrd.x) == 0:
+            QMessageBox.warning(self, "Export CSV", "No simulated diffraction data available to export.")
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Export XRD Data")
+        msg_box.setText("Select data to export:")
+        
+        profile_btn = msg_box.addButton("Simulated Profile (Curve)", QMessageBox.ButtonRole.ActionRole)
+        sticks_btn = msg_box.addButton("Bragg Peaks (Sticks)", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
+        
+        msg_box.exec()
+        
+        if msg_box.clickedButton() == cancel_btn:
+            return
+            
+        export_profile = (msg_box.clickedButton() == profile_btn)
+        
+        default_filename = f"{self.cif_structure.name}_profile.csv" if export_profile else f"{self.cif_structure.name}_sticks.csv"
+        
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export XRD Data as CSV",
+            default_filename,
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+            
+        try:
+            import csv
+            if export_profile:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["2-Theta (deg)", "Intensity"])
+                    for x, y in zip(self.last_profile_x, self.last_profile_y):
+                        writer.writerow([f"{x:.4f}", f"{y:.4f}"])
+            else:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["2-Theta (deg)", "Intensity", "d-spacing (A)", "HKL"])
+                    for x, y, d, hkls in zip(self.last_xrd.x, self.last_xrd.y, self.last_xrd.d_hkls, self.last_xrd.hkls):
+                        hkl_str = ";".join(f"({h['hkl'][0]},{h['hkl'][1]},{h['hkl'][2]})" for h in hkls)
+                        writer.writerow([f"{x:.4f}", f"{y:.4f}", f"{d:.4f}", hkl_str])
+                        
+            QMessageBox.information(
+                self,
+                "Export CSV",
+                f"Successfully exported to:\n{path}"
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Export CSV",
+                f"Failed to export CSV file:\n{exc}"
+            )
