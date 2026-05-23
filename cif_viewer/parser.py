@@ -1032,19 +1032,73 @@ def celleditpy_cell_axis_segments(lattice: np.ndarray):
 
 
 def infer_bonds(atoms: Sequence[RenderAtom]) -> List[Tuple[int, int]]:
+    if not atoms:
+        return []
+    
     bonds: List[Tuple[int, int]] = []
     max_cutoff = 2.45
-    for left in range(len(atoms)):
-        left_radius = covalent_radius(atoms[left].element)
-        for right in range(left + 1, len(atoms)):
-            if atoms[left].disorder_key is not None and atoms[right].disorder_key is not None:
-                if atoms[left].disorder_key != atoms[right].disorder_key:
-                    continue
-            right_radius = covalent_radius(atoms[right].element)
-            cutoff = min(max_cutoff, left_radius + right_radius + 0.45)
-            distance = float(np.linalg.norm(atoms[left].position - atoms[right].position))
-            if 0.25 <= distance <= cutoff:
-                bonds.append((left, right))
+    
+    positions = np.array([atom.position for atom in atoms])
+    min_coords = np.min(positions, axis=0) - 1.0
+    
+    # Voxel grid partitioning with bin size equal to max_cutoff
+    bins = {}
+    for idx, pos in enumerate(positions):
+        bin_idx = tuple(((pos - min_coords) / max_cutoff).astype(int))
+        if bin_idx not in bins:
+            bins[bin_idx] = []
+        bins[bin_idx].append(idx)
+        
+    # 26 neighbor offset directions
+    neighbor_offsets = [
+        (dx, dy, dz)
+        for dx in (-1, 0, 1)
+        for dy in (-1, 0, 1)
+        for dz in (-1, 0, 1)
+        if (dx, dy, dz) != (0, 0, 0)
+    ]
+    
+    for bin_idx, left_indices in bins.items():
+        n_left = len(left_indices)
+        # 1. Check pairs in the same bin
+        for i in range(n_left):
+            left = left_indices[i]
+            left_atom = atoms[left]
+            left_radius = covalent_radius(left_atom.element)
+            for j in range(i + 1, n_left):
+                right = left_indices[j]
+                right_atom = atoms[right]
+                if left_atom.disorder_key is not None and right_atom.disorder_key is not None:
+                    if left_atom.disorder_key != right_atom.disorder_key:
+                        continue
+                right_radius = covalent_radius(right_atom.element)
+                cutoff = min(max_cutoff, left_radius + right_radius + 0.45)
+                dist_sq = np.sum((positions[left] - positions[right])**2)
+                if 0.25*0.25 <= dist_sq <= cutoff*cutoff:
+                    bonds.append((left, right))
+                    
+        # 2. Check pairs with adjacent bins
+        bx, by, bz = bin_idx
+        for dx, dy, dz in neighbor_offsets:
+            neigh_bin = (bx + dx, by + dy, bz + dz)
+            if neigh_bin in bins:
+                right_indices = bins[neigh_bin]
+                for left in left_indices:
+                    left_atom = atoms[left]
+                    left_radius = covalent_radius(left_atom.element)
+                    for right in right_indices:
+                        if left >= right:
+                            continue
+                        right_atom = atoms[right]
+                        if left_atom.disorder_key is not None and right_atom.disorder_key is not None:
+                            if left_atom.disorder_key != right_atom.disorder_key:
+                                continue
+                        right_radius = covalent_radius(right_atom.element)
+                        cutoff = min(max_cutoff, left_radius + right_radius + 0.45)
+                        dist_sq = np.sum((positions[left] - positions[right])**2)
+                        if 0.25*0.25 <= dist_sq <= cutoff*cutoff:
+                            bonds.append((left, right))
+                            
     return bonds
 
 
