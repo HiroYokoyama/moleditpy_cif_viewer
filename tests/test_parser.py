@@ -137,7 +137,7 @@ def test_write_supercell_cif(tmp_path):
     structure = parse_cif(NACL_CIF)
     export_path = tmp_path / "supercell.cif"
     write_supercell_cif(str(export_path), structure, (2, 1, 1), keep_connected=False)
-    
+
     # Parse the exported supercell
     exported_struct = parse_cif(export_path.read_text(encoding="utf-8"))
     assert exported_struct.cell_lengths == (11.2804, 5.6402, 5.6402)
@@ -145,7 +145,7 @@ def test_write_supercell_cif(tmp_path):
     # The first atom (Na1_0_0_0)
     assert exported_struct.atoms[0].element == "Na"
     np.testing.assert_allclose(exported_struct.atoms[0].fract, [0.0, 0.0, 0.0])
-    
+
     # Check all fractional x coordinates: they should be 0.0, 0.25, 0.5, 0.75
     frac_xs = sorted(atom.fract[0] for atom in exported_struct.atoms)
     np.testing.assert_allclose(frac_xs, [0.0, 0.25, 0.5, 0.75])
@@ -154,7 +154,7 @@ def test_write_supercell_cif(tmp_path):
 def test_render_atoms_to_rdkit_mol():
     from cif_viewer.rdkit_bridge import render_atoms_to_rdkit_mol
     from cif_viewer.parser import RenderAtom
-    
+
     atoms = [
         RenderAtom("C1", "C", 0, (0, 0, 0), np.array([0.0, 0.0, 0.0])),
         RenderAtom("H1", "H", 1, (0, 0, 0), np.array([1.0, 0.0, 0.0])),
@@ -165,10 +165,10 @@ def test_render_atoms_to_rdkit_mol():
     assert mol.GetAtomWithIdx(0).GetSymbol() == "C"
     assert mol.GetAtomWithIdx(1).GetSymbol() == "H"
     assert mol.GetNumBonds() == 1
-    
+
     bond = mol.GetBondBetweenAtoms(0, 1)
     assert bond is not None
-    
+
     conf = mol.GetConformer()
     np.testing.assert_allclose(conf.GetAtomPosition(0), [0.0, 0.0, 0.0])
     np.testing.assert_allclose(conf.GetAtomPosition(1), [1.0, 0.0, 0.0])
@@ -176,6 +176,7 @@ def test_render_atoms_to_rdkit_mol():
 
 def test_parse_cif_file(tmp_path):
     from cif_viewer.parser import parse_cif_file
+
     cif_file = tmp_path / "nacl.cif"
     cif_file.write_text(NACL_CIF, encoding="utf-8")
     structure = parse_cif_file(str(cif_file))
@@ -185,6 +186,7 @@ def test_parse_cif_file(tmp_path):
 
 def test_covalent_radius_and_normalize_element():
     from cif_viewer.parser import covalent_radius, normalize_element
+
     assert covalent_radius("C") == 0.76
     assert covalent_radius("h") == 0.31
     assert covalent_radius("Xx") == 0.77  # fallback
@@ -195,6 +197,7 @@ def test_covalent_radius_and_normalize_element():
 
 def test_parse_cif_number_errors():
     import pytest
+
     with pytest.raises(ValueError):
         parse_cif_number("?")
     with pytest.raises(ValueError):
@@ -203,6 +206,7 @@ def test_parse_cif_number_errors():
 
 def test_parse_cif_missing_atoms():
     import pytest
+
     bad_cif = """
 data_bad
 _cell_length_a 10
@@ -219,6 +223,7 @@ _cell_angle_gamma 90
 def test_cell_vectors_invalid():
     import pytest
     from cif_viewer.parser import cell_vectors
+
     # Gamma 180 or 0 makes sin(gamma) = 0
     with pytest.raises(ValueError):
         cell_vectors((10.0, 10.0, 10.0), (90.0, 90.0, 180.0))
@@ -279,6 +284,7 @@ C3 C 0.3 0.3 0.3 . .
 
 def test_parse_cif_file_pymatgen_disorder_and_metadata(tmp_path):
     from cif_viewer.parser import parse_cif_file_pymatgen
+
     cif_content = """
 data_DisorderPymatgen
 _cell_length_a    10.0
@@ -308,18 +314,18 @@ C3 C 0.3 0.3 0.3 . .
 """
     cif_file = tmp_path / "disorder.cif"
     cif_file.write_text(cif_content, encoding="utf-8")
-    
+
     structures = parse_cif_file_pymatgen(str(cif_file))
     assert len(structures) == 1
     structure = structures[0]
-    
+
     assert structure.space_group == "P 21/c"
     assert structure.crystal_system == "monoclinic"
     assert structure.formula == "C10 H15 N O"
     assert structure.r1 == "0.045"
     assert structure.wr2 == "0.120"
     assert structure.goof == "1.05"
-    
+
     assert len(structure.atoms) == 3
     # Check that disorder assemblies and groups map correctly for the parsed atoms
     # We sort by label or element just in case order differs in pymatgen
@@ -328,12 +334,12 @@ C3 C 0.3 0.3 0.3 . .
     assert atoms_map["C1"].disorder_group == "1"
     assert atoms_map["C1"].disorder_assembly == "A"
     assert atoms_map["C1"].disorder_key == "A_1"
-    
+
     assert "C2" in atoms_map
     assert atoms_map["C2"].disorder_group == "2"
     assert atoms_map["C2"].disorder_assembly == "A"
     assert atoms_map["C2"].disorder_key == "A_2"
-    
+
     assert "C3" in atoms_map
     assert atoms_map["C3"].disorder_group is None
     assert atoms_map["C3"].disorder_assembly is None
@@ -363,7 +369,7 @@ C3 C 0.5 0.5 0.4 . .
 """
     structure = parse_cif(cif)
     atoms, bonds = expand_supercell(structure, (1, 1, 1), keep_connected=False)
-    
+
     assert len(structure.atoms) == 3
     # C1 and C2 are in different groups (A_1 vs A_2), so they should not form a bond.
     # C1 (index 0) and C3 (index 2, framework atom) should form a bond.
@@ -400,9 +406,9 @@ C3 C 0.5 0.5 0.4 . .
         structure,
         (1, 1, 1),
         keep_connected=False,
-        selected_disorder_key="A_1"
+        selected_disorder_key="A_1",
     )
-    
+
     exported = parse_cif(export_path.read_text(encoding="utf-8"))
     atoms_map = {a.label.split("_")[0]: a for a in exported.atoms}
     assert "C1" in atoms_map
@@ -453,6 +459,7 @@ C3 C 0.3 0.3 0.3 0.05 Uani 1.0 1 d . . . . .
     cif_file = tmp_path / "user_disorder.cif"
     cif_file.write_text(cif_content, encoding="utf-8")
     from cif_viewer.parser import parse_cif_file_pymatgen
+
     structures = parse_cif_file_pymatgen(str(cif_file))
     assert len(structures) == 1
     struct_pm = structures[0]
@@ -522,6 +529,7 @@ C1 C 0.1 0.1 0.1
     cif_file = tmp_path / "metadata_test.cif"
     cif_file.write_text(cif_content, encoding="utf-8")
     from cif_viewer.parser import parse_cif_file_pymatgen
+
     structures = parse_cif_file_pymatgen(str(cif_file))
     assert len(structures) == 1
     struct = structures[0]
@@ -537,6 +545,7 @@ C1 C 0.1 0.1 0.1
 
 def test_grow_molecules():
     from cif_viewer.parser import grow_molecules, parse_cif
+
     cif = """
 data_water
 _cell_length_a 10.0
@@ -564,6 +573,7 @@ H2 H 0.6 0.5 0.5
 
 def test_grow_molecules_boundary():
     from cif_viewer.parser import grow_molecules, parse_cif
+
     cif = """
 data_boundary_grow
 _cell_length_a 10.0
@@ -591,6 +601,7 @@ C2 C 0.05 0.5 0.5
 def test_grow_molecules_connected_only():
     from cif_viewer.parser import grow_molecules, parse_cif
     import numpy as np
+
     cif = """
 data_p21_test
 _cell_length_a 10.0
@@ -610,17 +621,9 @@ C1 C 0.1 0.1 0.1
 """
     struct = parse_cif(cif)
     atoms, bonds = grow_molecules(struct)
-    
+
     # Under P 1 21 1, there are 2 symmetry operations.
     # The generated atoms are disconnected, so only the original one (or its connections) is kept.
     assert len(atoms) == 1
     assert atoms[0].label == "C1"
     assert np.allclose(atoms[0].position, np.array([1.0, 1.0, 1.0]))
-
-
-
-
-
-
-
-

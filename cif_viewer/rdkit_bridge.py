@@ -26,4 +26,3 @@ def render_atoms_to_rdkit_mol(render_atoms, bonds: Sequence[Tuple[int, int]]):
         conformer.SetAtomPosition(index, Point3D(x, y, z))
     mol.AddConformer(conformer, assignId=True)
     return mol
-

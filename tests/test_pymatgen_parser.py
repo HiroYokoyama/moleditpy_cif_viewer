@@ -51,16 +51,16 @@ _atom_site_fract_y
 _atom_site_fract_z
 O1 O 0.0 0.0 0.0
 """
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.cif', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".cif", delete=False) as f:
         f.write(cif_content)
         temp_path = f.name
-        
+
     try:
         structures = parse_cif_file_pymatgen(temp_path)
         assert len(structures) == 2
         assert structures[0].name == "struct1"
         assert structures[1].name == "struct2"
-        
+
         # Verify ADPs
         assert structures[0].u_cart is not None
         assert structures[0].u_cart.shape == (2, 3, 3)

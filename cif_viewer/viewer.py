@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from typing import Optional
 
 import numpy as np
@@ -53,43 +54,50 @@ class CifViewerWidget(QWidget):
         self.current_path: Optional[str] = None
         self.overlay_actor_names = []
         self._reset_camera_on_next_render = True
-        
+
         from PyQt6.QtCore import QTimer
+
         self.render_timer = QTimer(self)
         self.render_timer.setSingleShot(True)
         self.render_timer.timeout.connect(self._render_now)
-        
+
         self._build_ui()
         self.load_settings()
 
     def _create_color_button(self, default_hex):
         btn = QPushButton()
         btn.setFixedWidth(50)
-        btn.setStyleSheet(f"background-color: {default_hex}; border: 1px solid #777; border-radius: 3px;")
+        btn.setStyleSheet(
+            f"background-color: {default_hex}; border: 1px solid #777; border-radius: 3px;"
+        )
         btn.setProperty("color_hex", default_hex)
-        
+
         def pick_color():
             current_hex = btn.property("color_hex")
             color = QColorDialog.getColor(QColor(current_hex), self, "Select Color")
             if color.isValid():
                 hex_name = color.name()
-                btn.setStyleSheet(f"background-color: {hex_name}; border: 1px solid #777; border-radius: 3px;")
+                btn.setStyleSheet(
+                    f"background-color: {hex_name}; border: 1px solid #777; border-radius: 3px;"
+                )
                 btn.setProperty("color_hex", hex_name)
                 self.save_settings()
                 self.render()
-                
+
         btn.clicked.connect(pick_color)
         return btn
 
     def _set_button_color(self, btn, hex_color):
         btn.setProperty("color_hex", hex_color)
-        btn.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #777; border-radius: 3px;")
+        btn.setStyleSheet(
+            f"background-color: {hex_color}; border: 1px solid #777; border-radius: 3px;"
+        )
 
     def _export_supercell(self):
         if self.structure is None:
             QMessageBox.warning(self, "Export CIF", "No CIF loaded to export.")
             return
-        
+
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Supercell CIF",
@@ -98,32 +106,36 @@ class CifViewerWidget(QWidget):
         )
         if not path:
             return
-            
+
         try:
-            repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
-            
+            repeats = (
+                self.repeat_a.value(),
+                self.repeat_b.value(),
+                self.repeat_c.value(),
+            )
+
             selected_key = None
-            if not self.disorder_combo.isHidden() and self.disorder_combo.currentIndex() > 0:
+            if (
+                not self.disorder_combo.isHidden()
+                and self.disorder_combo.currentIndex() > 0
+            ):
                 selected_key = self.disorder_combo.currentData()
-                
+
             from .parser import write_supercell_cif
+
             write_supercell_cif(
                 path,
                 self.structure,
                 repeats,
                 keep_connected=self.keep_connected.isChecked(),
-                selected_disorder_key=selected_key
+                selected_disorder_key=selected_key,
             )
             QMessageBox.information(
-                self,
-                "Export CIF",
-                f"Successfully exported supercell to:\n{path}"
+                self, "Export CIF", f"Successfully exported supercell to:\n{path}"
             )
         except Exception as exc:
             QMessageBox.critical(
-                self,
-                "Export CIF",
-                f"Failed to export supercell:\n{exc}"
+                self, "Export CIF", f"Failed to export supercell:\n{exc}"
             )
 
     def _build_ui(self):
@@ -134,10 +146,12 @@ class CifViewerWidget(QWidget):
         # --- Tab 1: Structure ---
         struct_tab = QWidget()
         struct_layout = QVBoxLayout(struct_tab)
-        
+
         file_row = QHBoxLayout()
         self.file_label = QLabel("No CIF loaded")
-        self.file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.file_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         open_button = QPushButton("Open CIF...")
         open_button.clicked.connect(self._choose_file)
         file_row.addWidget(self.file_label, 1)
@@ -147,9 +161,15 @@ class CifViewerWidget(QWidget):
         self.structure_table = QTableWidget()
         self.structure_table.setColumnCount(2)
         self.structure_table.setHorizontalHeaderLabels(["Structure", "Atoms"])
-        self.structure_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.structure_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.structure_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.structure_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.structure_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.structure_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.structure_table.setFixedHeight(120)
         self.structure_table.itemSelectionChanged.connect(self._structure_selected)
         self.structure_table.setVisible(False)
@@ -170,22 +190,22 @@ class CifViewerWidget(QWidget):
         view_row = QHBoxLayout()
         view_label = QLabel("Display Mode:")
         view_row.addWidget(view_label)
-        
+
         self.view_mode_group = QButtonGroup(self)
-        self.radio_asym = QRadioButton("Asymmetric Unit")
         self.radio_mol = QRadioButton("Whole Molecule")
+        self.radio_asym = QRadioButton("Asymmetric Unit")
         self.radio_pack = QRadioButton("Packing")
-        
-        self.view_mode_group.addButton(self.radio_asym)
+
         self.view_mode_group.addButton(self.radio_mol)
+        self.view_mode_group.addButton(self.radio_asym)
         self.view_mode_group.addButton(self.radio_pack)
-        
-        self.radio_asym.toggled.connect(self._on_view_mode_changed)
+
         self.radio_mol.toggled.connect(self._on_view_mode_changed)
+        self.radio_asym.toggled.connect(self._on_view_mode_changed)
         self.radio_pack.toggled.connect(self._on_view_mode_changed)
-        
-        view_row.addWidget(self.radio_asym)
+
         view_row.addWidget(self.radio_mol)
+        view_row.addWidget(self.radio_asym)
         view_row.addWidget(self.radio_pack)
         struct_layout.addLayout(view_row)
 
@@ -203,22 +223,21 @@ class CifViewerWidget(QWidget):
 
         self.tabs.addTab(struct_tab, "Structure")
 
-
         # --- Tab 2: Info (Refinement & Cell Metadata) ---
         info_tab = QScrollArea()
         info_tab.setWidgetResizable(True)
-        
+
         info_content = QWidget()
         info_content_layout = QVBoxLayout(info_content)
         info_content_layout.setContentsMargins(5, 5, 5, 5)
         info_content_layout.setSpacing(10)
-        
+
         # 1. Crystal & Unit Cell Group
         group_cell = QGroupBox("Crystal & Unit Cell")
         layout_cell = QFormLayout(group_cell)
         layout_cell.setContentsMargins(5, 5, 5, 5)
         layout_cell.setSpacing(5)
-        
+
         self.info_formula = QLabel("N/A")
         self.info_space_group = QLabel("N/A")
         self.info_space_group_number = QLabel("N/A")
@@ -235,7 +254,7 @@ class CifViewerWidget(QWidget):
         self.info_density = QLabel("N/A")
         self.info_mu = QLabel("N/A")
         self.info_f000 = QLabel("N/A")
-        
+
         layout_cell.addRow("Formula:", self.info_formula)
         layout_cell.addRow("Space Group:", self.info_space_group)
         layout_cell.addRow("Space Group No.:", self.info_space_group_number)
@@ -252,13 +271,13 @@ class CifViewerWidget(QWidget):
         layout_cell.addRow("Density (calc. g/cm³):", self.info_density)
         layout_cell.addRow("μ (mm⁻¹):", self.info_mu)
         layout_cell.addRow("F(000):", self.info_f000)
-        
+
         # 2. Data Collection Group
         group_data = QGroupBox("Data Collection")
         layout_data = QFormLayout(group_data)
         layout_data.setContentsMargins(5, 5, 5, 5)
         layout_data.setSpacing(5)
-        
+
         self.info_temp = QLabel("N/A")
         self.info_wavelength = QLabel("N/A")
         self.info_crystal_size = QLabel("N/A")
@@ -268,7 +287,7 @@ class CifViewerWidget(QWidget):
         self.info_reflns_unique = QLabel("N/A")
         self.info_r_int = QLabel("N/A")
         self.info_completeness = QLabel("N/A")
-        
+
         layout_data.addRow("Temperature (K):", self.info_temp)
         layout_data.addRow("Wavelength (Å):", self.info_wavelength)
         layout_data.addRow("Crystal Size (mm):", self.info_crystal_size)
@@ -278,13 +297,13 @@ class CifViewerWidget(QWidget):
         layout_data.addRow("Reflns Unique:", self.info_reflns_unique)
         layout_data.addRow("R(int):", self.info_r_int)
         layout_data.addRow("Completeness:", self.info_completeness)
-        
+
         # 3. Refinement Group
         group_refine = QGroupBox("Refinement")
         layout_refine = QFormLayout(group_refine)
         layout_refine.setContentsMargins(5, 5, 5, 5)
         layout_refine.setSpacing(5)
-        
+
         self.info_refinement_method = QLabel("N/A")
         self.info_num_reflns = QLabel("N/A")
         self.info_num_params = QLabel("N/A")
@@ -297,7 +316,7 @@ class CifViewerWidget(QWidget):
         self.info_max_shift = QLabel("N/A")
         self.info_flack = QLabel("N/A")
         self.info_diff_peak_hole = QLabel("N/A")
-        
+
         layout_refine.addRow("Refinement Method:", self.info_refinement_method)
         layout_refine.addRow("No. Reflns:", self.info_num_reflns)
         layout_refine.addRow("No. Parameters:", self.info_num_params)
@@ -310,38 +329,61 @@ class CifViewerWidget(QWidget):
         layout_refine.addRow("Max Shift/s.u.:", self.info_max_shift)
         layout_refine.addRow("Flack Parameter:", self.info_flack)
         layout_refine.addRow("Diff Peak/Hole (e/Å³):", self.info_diff_peak_hole)
-        
+
         # Enable text selection
         all_info_labels = [
-            self.info_formula, self.info_space_group, self.info_space_group_number, self.info_crystal_system,
-            self.info_cell_a, self.info_cell_b, self.info_cell_c,
-            self.info_cell_alpha, self.info_cell_beta, self.info_cell_gamma,
-            self.info_volume, self.info_z, self.info_z_prime,
-            self.info_density, self.info_mu, self.info_f000,
-            self.info_temp, self.info_wavelength, self.info_crystal_size,
-            self.info_theta_range, self.info_hkl_ranges, self.info_reflns_collected,
-            self.info_reflns_unique, self.info_r_int, self.info_completeness,
-            self.info_refinement_method, self.info_num_reflns, self.info_num_params,
-            self.info_num_restraints, self.info_goof, self.info_r1,
-            self.info_wr2, self.info_r1_all, self.info_wr2_all,
-            self.info_max_shift, self.info_flack,
-            self.info_diff_peak_hole
+            self.info_formula,
+            self.info_space_group,
+            self.info_space_group_number,
+            self.info_crystal_system,
+            self.info_cell_a,
+            self.info_cell_b,
+            self.info_cell_c,
+            self.info_cell_alpha,
+            self.info_cell_beta,
+            self.info_cell_gamma,
+            self.info_volume,
+            self.info_z,
+            self.info_z_prime,
+            self.info_density,
+            self.info_mu,
+            self.info_f000,
+            self.info_temp,
+            self.info_wavelength,
+            self.info_crystal_size,
+            self.info_theta_range,
+            self.info_hkl_ranges,
+            self.info_reflns_collected,
+            self.info_reflns_unique,
+            self.info_r_int,
+            self.info_completeness,
+            self.info_refinement_method,
+            self.info_num_reflns,
+            self.info_num_params,
+            self.info_num_restraints,
+            self.info_goof,
+            self.info_r1,
+            self.info_wr2,
+            self.info_r1_all,
+            self.info_wr2_all,
+            self.info_max_shift,
+            self.info_flack,
+            self.info_diff_peak_hole,
         ]
         for lbl in all_info_labels:
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            
+
         info_content_layout.addWidget(group_cell)
         info_content_layout.addWidget(group_data)
         info_content_layout.addWidget(group_refine)
-        
+
         self.simulate_xrd_btn = QPushButton("Simulate Powder Pattern (XRD)...")
         self.simulate_xrd_btn.clicked.connect(self._simulate_powder_pattern)
         self.simulate_xrd_btn.setEnabled(False)
         info_content_layout.addWidget(self.simulate_xrd_btn)
-        
+
         info_tab.setWidget(info_content)
         self.tabs.addTab(info_tab, "Info")
-
 
         # --- Tab 2: Supercell ---
         supercell_tab = QWidget()
@@ -480,7 +522,7 @@ class CifViewerWidget(QWidget):
         btn_b.clicked.connect(lambda: self.view_from_axis("b"))
         btn_c = QPushButton("c")
         btn_c.clicked.connect(lambda: self.view_from_axis("c"))
-        
+
         btn_na = QPushButton("-a")
         btn_na.clicked.connect(lambda: self.view_from_axis("-a"))
         btn_nb = QPushButton("-b")
@@ -495,7 +537,6 @@ class CifViewerWidget(QWidget):
         view_grid.addWidget(btn_nb, 1, 1)
         view_grid.addWidget(btn_nc, 1, 2)
         cell_axes_layout.addRow("View axis:", view_grid)
-
 
         # Color settings
         self.color_axis_a = self._create_color_button("#ff0000")
@@ -530,13 +571,13 @@ class CifViewerWidget(QWidget):
         layout.addLayout(button_row)
 
     def _get_current_view_mode(self) -> str:
-        if self.radio_asym.isChecked():
-            return "Asymmetric Unit"
-        elif self.radio_mol.isChecked():
+        if self.radio_mol.isChecked():
             return "Whole Molecule"
+        elif self.radio_asym.isChecked():
+            return "Asymmetric Unit"
         elif self.radio_pack.isChecked():
             return "Packing"
-        return "Asymmetric Unit"
+        return "Whole Molecule"
 
     def _set_current_view_mode(self, mode: str):
         self.radio_asym.blockSignals(True)
@@ -599,7 +640,7 @@ class CifViewerWidget(QWidget):
             return
 
         lattice = np.asarray(self.structure.lattice, dtype=float)
-        
+
         if axis_name == "a":
             direction = lattice[0]
             view_up = lattice[2]
@@ -634,15 +675,13 @@ class CifViewerWidget(QWidget):
 
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
         focal_point = self._cell_center(repeats)
-        
+
         # Calculate maximum cell dimension to place the camera outside
         scaled_a = lattice[0] * repeats[0]
         scaled_b = lattice[1] * repeats[1]
         scaled_c = lattice[2] * repeats[2]
         max_dim = max(
-            np.linalg.norm(scaled_a),
-            np.linalg.norm(scaled_b),
-            np.linalg.norm(scaled_c)
+            np.linalg.norm(scaled_a), np.linalg.norm(scaled_b), np.linalg.norm(scaled_c)
         )
         distance = max_dim * 2.0
         if distance == 0:
@@ -652,22 +691,23 @@ class CifViewerWidget(QWidget):
 
         try:
             plotter.camera_position = (camera_position, focal_point, up_unit)
-        except Exception:
+        except Exception as exc:
+            logging.debug("Failed to set camera_position in view_from_axis: %s", exc)
             try:
                 if hasattr(plotter, "camera"):
                     plotter.camera.position = camera_position
                     plotter.camera.focal_point = focal_point
                     plotter.camera.up = up_unit
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug("Failed to set individual camera attributes: %s", e)
 
         self._reset_camera_on_next_render = False
 
         try:
             plotter.reset_camera()
             plotter.render()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("Failed to reset camera or render in view_from_axis: %s", exc)
 
     def reset_to_defaults(self):
         self.show_bonds.blockSignals(True)
@@ -699,15 +739,15 @@ class CifViewerWidget(QWidget):
             self.h_scale_spin.setValue(20.0)
             self.axis_width.setValue(5)
             self.ellipsoid_ring_width.setValue(2)
-            
+
             idx = self.axis_font.findText("arial")
             if idx >= 0:
                 self.axis_font.setCurrentIndex(idx)
             self.axis_font_size.setValue(20)
-            
-            self.radio_asym.setChecked(True)
+
+            self.radio_mol.setChecked(True)
             self.show_cell.setEnabled(False)
-            
+
             self._set_button_color(self.color_axis_a, "#ff0000")
             self._set_button_color(self.color_axis_b, "#00ff00")
             self._set_button_color(self.color_axis_c, "#0000ff")
@@ -731,7 +771,7 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(False)
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
-            
+
         self.save_settings()
         self.render()
 
@@ -739,7 +779,9 @@ class CifViewerWidget(QWidget):
         if self.context is not None:
             mw = self.context.get_main_window()
             if mw is not None:
-                if hasattr(mw, "init_manager") and hasattr(mw.init_manager, "style_button"):
+                if hasattr(mw, "init_manager") and hasattr(
+                    mw.init_manager, "style_button"
+                ):
                     style_btn = mw.init_manager.style_button
                     if style_btn is not None and style_btn.menu() is not None:
                         for action in style_btn.menu().actions():
@@ -790,7 +832,7 @@ class CifViewerWidget(QWidget):
             for k in sorted(keys):
                 self.disorder_combo.addItem(f"Part {k}", k)
             self.disorder_combo.blockSignals(False)
-            
+
             self.disorder_label.setVisible(True)
             self.disorder_combo.setVisible(True)
         else:
@@ -800,43 +842,79 @@ class CifViewerWidget(QWidget):
     def _update_info_ui(self):
         if self.structure is None:
             all_info_labels = [
-                self.info_formula, self.info_space_group, self.info_space_group_number, self.info_crystal_system,
-                self.info_cell_a, self.info_cell_b, self.info_cell_c,
-                self.info_cell_alpha, self.info_cell_beta, self.info_cell_gamma,
-                self.info_volume, self.info_z, self.info_z_prime,
-                self.info_density, self.info_mu, self.info_f000,
-                self.info_temp, self.info_wavelength, self.info_crystal_size,
-                self.info_theta_range, self.info_hkl_ranges, self.info_reflns_collected,
-                self.info_reflns_unique, self.info_r_int, self.info_completeness,
-                self.info_refinement_method, self.info_num_reflns, self.info_num_params,
-                self.info_num_restraints, self.info_goof, self.info_r1,
-                self.info_wr2, self.info_r1_all, self.info_wr2_all,
-                self.info_max_shift, self.info_flack,
-                self.info_diff_peak_hole
+                self.info_formula,
+                self.info_space_group,
+                self.info_space_group_number,
+                self.info_crystal_system,
+                self.info_cell_a,
+                self.info_cell_b,
+                self.info_cell_c,
+                self.info_cell_alpha,
+                self.info_cell_beta,
+                self.info_cell_gamma,
+                self.info_volume,
+                self.info_z,
+                self.info_z_prime,
+                self.info_density,
+                self.info_mu,
+                self.info_f000,
+                self.info_temp,
+                self.info_wavelength,
+                self.info_crystal_size,
+                self.info_theta_range,
+                self.info_hkl_ranges,
+                self.info_reflns_collected,
+                self.info_reflns_unique,
+                self.info_r_int,
+                self.info_completeness,
+                self.info_refinement_method,
+                self.info_num_reflns,
+                self.info_num_params,
+                self.info_num_restraints,
+                self.info_goof,
+                self.info_r1,
+                self.info_wr2,
+                self.info_r1_all,
+                self.info_wr2_all,
+                self.info_max_shift,
+                self.info_flack,
+                self.info_diff_peak_hole,
             ]
             for lbl in all_info_labels:
                 lbl.setText("N/A")
             self.simulate_xrd_btn.setEnabled(False)
             return
-            
+
         s = self.structure
         self.info_formula.setText(s.formula or "N/A")
         self.info_space_group.setText(s.space_group or "N/A")
         self.info_space_group_number.setText(s.space_group_number or "N/A")
         self.info_crystal_system.setText(s.crystal_system or "N/A")
-        self.info_cell_a.setText(s.cell_a_str or (f"{s.cell_lengths[0]:.4f}" if s.cell_lengths else "N/A"))
-        self.info_cell_b.setText(s.cell_b_str or (f"{s.cell_lengths[1]:.4f}" if s.cell_lengths else "N/A"))
-        self.info_cell_c.setText(s.cell_c_str or (f"{s.cell_lengths[2]:.4f}" if s.cell_lengths else "N/A"))
-        self.info_cell_alpha.setText(s.cell_alpha_str or (f"{s.cell_angles[0]:.3f}" if s.cell_angles else "N/A"))
-        self.info_cell_beta.setText(s.cell_beta_str or (f"{s.cell_angles[1]:.3f}" if s.cell_angles else "N/A"))
-        self.info_cell_gamma.setText(s.cell_gamma_str or (f"{s.cell_angles[2]:.3f}" if s.cell_angles else "N/A"))
+        self.info_cell_a.setText(
+            s.cell_a_str or (f"{s.cell_lengths[0]:.4f}" if s.cell_lengths else "N/A")
+        )
+        self.info_cell_b.setText(
+            s.cell_b_str or (f"{s.cell_lengths[1]:.4f}" if s.cell_lengths else "N/A")
+        )
+        self.info_cell_c.setText(
+            s.cell_c_str or (f"{s.cell_lengths[2]:.4f}" if s.cell_lengths else "N/A")
+        )
+        self.info_cell_alpha.setText(
+            s.cell_alpha_str or (f"{s.cell_angles[0]:.3f}" if s.cell_angles else "N/A")
+        )
+        self.info_cell_beta.setText(
+            s.cell_beta_str or (f"{s.cell_angles[1]:.3f}" if s.cell_angles else "N/A")
+        )
+        self.info_cell_gamma.setText(
+            s.cell_gamma_str or (f"{s.cell_angles[2]:.3f}" if s.cell_angles else "N/A")
+        )
         self.info_volume.setText(s.volume or "N/A")
         self.info_z.setText(s.z or "N/A")
         self.info_z_prime.setText(s.z_prime or "N/A")
         self.info_density.setText(s.density or "N/A")
         self.info_mu.setText(s.mu or "N/A")
         self.info_f000.setText(s.f000 or "N/A")
-        
+
         self.info_temp.setText(s.temp or "N/A")
         self.info_wavelength.setText(s.wavelength or "N/A")
         self.info_crystal_size.setText(s.crystal_size or "N/A")
@@ -846,7 +924,7 @@ class CifViewerWidget(QWidget):
         self.info_reflns_unique.setText(s.reflns_unique or "N/A")
         self.info_r_int.setText(s.r_int or "N/A")
         self.info_completeness.setText(s.completeness or "N/A")
-        
+
         self.info_refinement_method.setText(s.refinement_method or "N/A")
         self.info_num_reflns.setText(s.num_reflns or "N/A")
         self.info_num_params.setText(s.num_params or "N/A")
@@ -859,18 +937,22 @@ class CifViewerWidget(QWidget):
         self.info_max_shift.setText(s.max_shift or "N/A")
         self.info_flack.setText(s.flack or "N/A")
         self.info_diff_peak_hole.setText(s.diff_peak_hole or "N/A")
-        
+
         self.simulate_xrd_btn.setEnabled(True)
 
     def _simulate_powder_pattern(self):
         if self.structure is None:
             return
-        
+
         selected_key = None
-        if not self.disorder_combo.isHidden() and self.disorder_combo.currentIndex() > 0:
+        if (
+            not self.disorder_combo.isHidden()
+            and self.disorder_combo.currentIndex() > 0
+        ):
             selected_key = self.disorder_combo.currentData()
-            
+
         from .viewer_xrd import PowderPatternDialog
+
         dialog = PowderPatternDialog(self.structure, selected_key, self)
         dialog.exec()
 
@@ -882,6 +964,7 @@ class CifViewerWidget(QWidget):
         if not os.path.exists(path):
             return
         import json
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -901,9 +984,9 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(True)
             self.radio_mol.blockSignals(True)
             self.radio_pack.blockSignals(True)
-            
-            self._set_current_view_mode("Asymmetric Unit")
-                    
+
+            self._set_current_view_mode("Whole Molecule")
+
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
             if "show_hydrogens" in data:
@@ -924,6 +1007,7 @@ class CifViewerWidget(QWidget):
                 try:
                     val_str = str(data["probability"])
                     import re
+
                     match = re.search(r"([\d\.]+)", val_str)
                     if match:
                         val = float(match.group(1))
@@ -932,8 +1016,8 @@ class CifViewerWidget(QWidget):
                         if val <= 10.0:
                             val = 50.0
                         self.probability_spin.setValue(val)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.debug("Failed to parse probability setting: %s", exc)
             if "axis_width" in data:
                 self.axis_width.setValue(int(data["axis_width"]))
             if "axis_font" in data:
@@ -953,11 +1037,13 @@ class CifViewerWidget(QWidget):
             if "color_origin" in data:
                 self._set_button_color(self.color_origin, data["color_origin"])
             if "color_ellipsoid_rings" in data:
-                self._set_button_color(self.color_ellipsoid_rings, data["color_ellipsoid_rings"])
+                self._set_button_color(
+                    self.color_ellipsoid_rings, data["color_ellipsoid_rings"]
+                )
             if "ellipsoid_ring_width" in data:
                 self.ellipsoid_ring_width.setValue(int(data["ellipsoid_ring_width"]))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error("Failed to load settings: %s", e)
         finally:
             self.show_bonds.blockSignals(False)
             self.show_hydrogens.blockSignals(False)
@@ -975,10 +1061,11 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(False)
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
- 
+
     def save_settings(self, *args):
         path = self._settings_path()
         import json
+
         data = {
             "show_bonds": self.show_bonds.isChecked(),
             "show_hydrogens": self.show_hydrogens.isChecked(),
@@ -1003,8 +1090,8 @@ class CifViewerWidget(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error("Failed to save settings: %s", e)
 
     def load_cif(self, path: str):
         for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
@@ -1014,28 +1101,39 @@ class CifViewerWidget(QWidget):
 
         try:
             self.all_structures = parse_cif_file_pymatgen(path)
-        except Exception:
+        except Exception as e_pymatgen:
+            logging.info(
+                "pymatgen parser failed, falling back to built-in parser: %s",
+                e_pymatgen,
+            )
             try:
                 self.all_structures = [parse_cif_file(path)]
             except Exception as exc:
-                QMessageBox.critical(self, "CIF Viewer", f"Could not read CIF file:\n{exc}")
+                QMessageBox.critical(
+                    self, "CIF Viewer", f"Could not read CIF file:\n{exc}"
+                )
+                logging.error("Failed to read CIF file %s: %s", path, exc)
                 return
-                
+
         if not self.all_structures:
-            QMessageBox.critical(self, "CIF Viewer", "No valid structures found in CIF file.")
+            QMessageBox.critical(
+                self, "CIF Viewer", "No valid structures found in CIF file."
+            )
             return
 
         self._reset_camera_on_next_render = True
         self.current_path = path
         self.file_label.setText(os.path.basename(path))
-        
+
         mw = self._main_window()
         if mw is not None:
             if hasattr(mw, "init_manager"):
                 mw.init_manager.current_file_path = path
-            if hasattr(mw, "state_manager") and hasattr(mw.state_manager, "update_window_title"):
+            if hasattr(mw, "state_manager") and hasattr(
+                mw.state_manager, "update_window_title"
+            ):
                 mw.state_manager.update_window_title()
-        
+
         self.structure_table.blockSignals(True)
         self.structure_table.setRowCount(len(self.all_structures))
         for i, struct in enumerate(self.all_structures):
@@ -1045,7 +1143,7 @@ class CifViewerWidget(QWidget):
             atoms_item.setFlags(atoms_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.structure_table.setItem(i, 0, name_item)
             self.structure_table.setItem(i, 1, atoms_item)
-            
+
         if len(self.all_structures) > 1:
             self.structure_table.setVisible(True)
             self.structure_table.selectRow(0)
@@ -1053,14 +1151,15 @@ class CifViewerWidget(QWidget):
         else:
             self.structure_table.setVisible(False)
             self.structure = self.all_structures[0]
-            
+
         self._update_disorder_ui()
         self._update_info_ui()
-            
+
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
-        
+
         from PyQt6.QtCore import QTimer
+
         QTimer.singleShot(100, self.render)
 
     def clear_view(self, redraw=True):
@@ -1070,14 +1169,14 @@ class CifViewerWidget(QWidget):
         for name in self.overlay_actor_names:
             try:
                 plotter.remove_actor(name)
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.debug("Failed to remove actor %s: %s", name, exc)
         self.overlay_actor_names.clear()
         if redraw:
             try:
                 plotter.render()
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.debug("Failed to render in clear_view: %s", exc)
 
     def render_overlays_only(self):
         if self.structure is None:
@@ -1095,8 +1194,8 @@ class CifViewerWidget(QWidget):
             if hasattr(plotter, "camera"):
                 plotter.camera.focal_point = self._cell_center(repeats)
             plotter.render()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("Failed to render overlays: %s", exc)
 
     def render(self):
         if self.structure is None:
@@ -1113,33 +1212,45 @@ class CifViewerWidget(QWidget):
 
         self.clear_view()
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
-        
+
         view_mode = self._get_current_view_mode()
         if view_mode == "Asymmetric Unit" or view_mode == "Whole Molecule":
-            base_atoms = self.structure.asymmetric_atoms if self.structure.asymmetric_atoms is not None else self.structure.atoms
+            base_atoms = (
+                self.structure.asymmetric_atoms
+                if self.structure.asymmetric_atoms is not None
+                else self.structure.atoms
+            )
         else:
             base_atoms = self.structure.atoms
 
         selected_key = None
-        if not self.disorder_combo.isHidden() and self.disorder_combo.currentIndex() > 0:
+        if (
+            not self.disorder_combo.isHidden()
+            and self.disorder_combo.currentIndex() > 0
+        ):
             selected_key = self.disorder_combo.currentData()
-            
+
         if selected_key is not None:
             base_atoms = [
-                atom for atom in base_atoms
-                if atom.disorder_group is None or atom.disorder_group == selected_key or atom.disorder_key == selected_key
+                atom
+                for atom in base_atoms
+                if atom.disorder_group is None
+                or atom.disorder_group == selected_key
+                or atom.disorder_key == selected_key
             ]
 
         import dataclasses
+
         structure_to_render = dataclasses.replace(
-            self.structure,
-            atoms=tuple(base_atoms),
-            asymmetric_atoms=tuple(base_atoms)
+            self.structure, atoms=tuple(base_atoms), asymmetric_atoms=tuple(base_atoms)
         )
 
         if view_mode == "Whole Molecule":
             from .parser import grow_molecules
-            atoms, bonds = grow_molecules(structure_to_render, selected_disorder_key=selected_key)
+
+            atoms, bonds = grow_molecules(
+                structure_to_render, selected_disorder_key=selected_key
+            )
         else:
             atoms, bonds = expand_supercell(
                 structure_to_render,
@@ -1149,8 +1260,9 @@ class CifViewerWidget(QWidget):
         if not self.show_hydrogens.isChecked():
             atoms = [atom for atom in atoms if atom.element != "H"]
             from .parser import infer_bonds
+
             bonds = infer_bonds(atoms)
-            
+
         mol_bonds = bonds if self.show_bonds.isChecked() else []
         self.last_rendered_atoms = atoms
         try:
@@ -1158,7 +1270,9 @@ class CifViewerWidget(QWidget):
             # Tag the molecule so custom styles and overlays know it's from CIF viewer
             mol.SetProp("_from_cif_viewer", "1")
         except Exception as exc:
-            QMessageBox.critical(self, "CIF Viewer", f"Could not build RDKit view:\n{exc}")
+            QMessageBox.critical(
+                self, "CIF Viewer", f"Could not build RDKit view:\n{exc}"
+            )
             return
 
         self._draw_with_moleditpy(mol)
@@ -1170,7 +1284,10 @@ class CifViewerWidget(QWidget):
 
             self.clear_view()
 
-            if self.show_cell.isChecked() and self._get_current_view_mode() == "Packing":
+            if (
+                self.show_cell.isChecked()
+                and self._get_current_view_mode() == "Packing"
+            ):
                 self._draw_cell_overlay(plotter, repeats)
 
             try:
@@ -1181,13 +1298,17 @@ class CifViewerWidget(QWidget):
                     if hasattr(plotter, "camera"):
                         plotter.camera.focal_point = self._cell_center(repeats)
                 plotter.render()
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.error("Failed to reset camera or render cell: %s", exc)
 
         try:
             from PyQt6.QtCore import QTimer
+
             QTimer.singleShot(100, draw_overlays_and_render)
-        except Exception:
+        except Exception as exc:
+            logging.warning(
+                "Failed to schedule draw_overlays_and_render with QTimer: %s", exc
+            )
             draw_overlays_and_render()
 
         self.summary_label.setText(
@@ -1196,13 +1317,16 @@ class CifViewerWidget(QWidget):
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
         if self.context and hasattr(self.context, "show_status_message"):
-            self.context.show_status_message("CIF Viewer rendered with MoleditPy 3D style.", 3000)
+            self.context.show_status_message(
+                "CIF Viewer rendered with MoleditPy 3D style.", 3000
+            )
 
     def _draw_with_moleditpy(self, mol):
         if self.context is not None and hasattr(self.context, "draw_molecule_3d"):
             try:
                 self.context.current_mol = mol
-            except Exception:
+            except Exception as exc:
+                logging.debug("Failed to assign context.current_mol directly: %s", exc)
                 self.context.draw_molecule_3d(mol)
             return
         main_window = self._main_window()
@@ -1210,8 +1334,10 @@ class CifViewerWidget(QWidget):
             if hasattr(main_window, "view_3d_manager"):
                 try:
                     main_window.view_3d_manager.current_mol = mol
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.debug(
+                        "Failed to set main_window.view_3d_manager.current_mol: %s", exc
+                    )
             main_window.draw_molecule_3d(mol)
 
     def _draw_cell_overlay(self, plotter, repeats):
@@ -1227,7 +1353,11 @@ class CifViewerWidget(QWidget):
         ):
             name = f"cif_viewer_cell_line_{index}"
             is_axis = bool(label and self.show_axes.isChecked())
-            width = self.axis_width.value() if is_axis else max(1, self.axis_width.value() - 2)
+            width = (
+                self.axis_width.value()
+                if is_axis
+                else max(1, self.axis_width.value() - 2)
+            )
 
             if is_axis:
                 if label == "a":
@@ -1239,7 +1369,9 @@ class CifViewerWidget(QWidget):
             else:
                 line_color = color_edges
 
-            plotter.add_lines(np.array([start, end]), color=line_color, width=width, name=name)
+            plotter.add_lines(
+                np.array([start, end]), color=line_color, width=width, name=name
+            )
             self.overlay_actor_names.append(name)
             if is_axis:
                 label_name = f"cif_viewer_cell_axis_label_{label}"
@@ -1289,16 +1421,16 @@ class CifViewerWidget(QWidget):
             try:
                 ui_manager._enter_3d_viewer_ui_mode()
                 return
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.debug("Failed to enter 3D viewer UI mode: %s", exc)
         for attr in ("splitter", "main_splitter", "central_splitter"):
             splitter = getattr(main_window, attr, None)
             if splitter is not None and hasattr(splitter, "setSizes"):
                 try:
                     splitter.setSizes([0, 1])
                     return
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.debug("Failed to set splitter sizes: %s", exc)
 
     def _plotter(self):
         if self.context is not None:
@@ -1316,7 +1448,11 @@ class CifViewerWidget(QWidget):
         if self.context is not None and hasattr(self.context, "get_main_window"):
             return self.context.get_main_window()
         parent = self.parent()
-        return parent.parent() if parent is not None and hasattr(parent, "parent") else None
+        return (
+            parent.parent()
+            if parent is not None and hasattr(parent, "parent")
+            else None
+        )
 
 
 CifViewerDialog = CifViewerWidget

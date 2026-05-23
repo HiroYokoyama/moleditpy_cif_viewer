@@ -1,6 +1,7 @@
 import os
 import pytest
 
+
 @pytest.fixture(autouse=True)
 def clean_settings_json():
     """
@@ -8,11 +9,9 @@ def clean_settings_json():
     before and after every test, preventing it from polluting the workspace.
     """
     settings_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "cif_viewer",
-        "settings.json"
+        os.path.dirname(os.path.dirname(__file__)), "cif_viewer", "settings.json"
     )
-    
+
     # Clean up before test
     if os.path.exists(settings_path):
         try:

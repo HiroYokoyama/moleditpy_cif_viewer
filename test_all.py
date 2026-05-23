@@ -8,10 +8,11 @@ If PyQt6 is not available or if the user passes --unit-only, it will skip Qt int
 import os
 import sys
 
+
 def main():
     # 1. Configure Qt backend for pytest-qt
     os.environ["PYTEST_QT_API"] = "pyqt6"
-    
+
     # 2. Set QPA platform to offscreen by default for headless operation if not already configured
     if "QT_QPA_PLATFORM" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -20,13 +21,15 @@ def main():
     try:
         import pytest
     except ImportError:
-        print("Error: 'pytest' is required to run tests. Please install it with: pip install pytest")
+        print(
+            "Error: 'pytest' is required to run tests. Please install it with: pip install pytest"
+        )
         sys.exit(1)
 
     # 4. Check for command-line overrides to run unit tests only
     unit_only = False
     pytest_args = []
-    
+
     for arg in sys.argv[1:]:
         if arg in ("--unit-only", "--skip-qt", "-u"):
             unit_only = True
@@ -39,6 +42,7 @@ def main():
         try:
             import PyQt6
             from PyQt6.QtWidgets import QApplication
+
             # Attempt to retrieve or create the QApplication instance
             app = QApplication.instance()
             if app is None:
@@ -49,10 +53,7 @@ def main():
             print("Falling back to unit tests only.")
 
     # 6. Define target files/directories
-    unit_test_files = [
-        "tests/test_parser.py",
-        "tests/test_pymatgen_parser.py"
-    ]
+    unit_test_files = ["tests/test_parser.py", "tests/test_pymatgen_parser.py"]
 
     # 7. Build pytest arguments list
     args = []
@@ -67,7 +68,7 @@ def main():
         for f in unit_test_files:
             print(f"  - {f}")
         print("=" * 80)
-        
+
         args.extend(unit_test_files)
         args.extend(pytest_args)
     else:
@@ -82,6 +83,7 @@ def main():
     # 8. Run pytest
     result = pytest.main(args)
     sys.exit(result)
+
 
 if __name__ == "__main__":
     main()
