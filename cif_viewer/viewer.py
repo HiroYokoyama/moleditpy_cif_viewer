@@ -103,7 +103,7 @@ class CifViewerWidget(QWidget):
             repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
             
             selected_key = None
-            if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
+            if not self.disorder_combo.isHidden() and self.disorder_combo.currentIndex() > 0:
                 selected_key = self.disorder_combo.currentData()
                 
             from .parser import write_supercell_cif
@@ -867,7 +867,7 @@ class CifViewerWidget(QWidget):
             return
         
         selected_key = None
-        if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
+        if not self.disorder_combo.isHidden() and self.disorder_combo.currentIndex() > 0:
             selected_key = self.disorder_combo.currentData()
             
         from .viewer_xrd import PowderPatternDialog
@@ -1121,7 +1121,7 @@ class CifViewerWidget(QWidget):
             base_atoms = self.structure.atoms
 
         selected_key = None
-        if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
+        if not self.disorder_combo.isHidden() and self.disorder_combo.currentIndex() > 0:
             selected_key = self.disorder_combo.currentData()
             
         if selected_key is not None:
