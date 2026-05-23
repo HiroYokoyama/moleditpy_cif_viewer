@@ -902,10 +902,7 @@ class CifViewerWidget(QWidget):
             self.radio_mol.blockSignals(True)
             self.radio_pack.blockSignals(True)
             
-            if "view_mode" in data:
-                self._set_current_view_mode(str(data["view_mode"]))
-            else:
-                self._set_current_view_mode("Asymmetric Unit")
+            self._set_current_view_mode("Asymmetric Unit")
                     
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
@@ -983,7 +980,6 @@ class CifViewerWidget(QWidget):
         path = self._settings_path()
         import json
         data = {
-            "view_mode": self._get_current_view_mode(),
             "show_bonds": self.show_bonds.isChecked(),
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
