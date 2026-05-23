@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QColorDialog,
     QScrollArea,
+    QRadioButton,
+    QButtonGroup,
 )
 
 from .parser import (
@@ -167,13 +169,27 @@ class CifViewerWidget(QWidget):
         # Display mode row
         view_row = QHBoxLayout()
         view_label = QLabel("Display Mode:")
-        self.view_mode_combo = QComboBox()
-        self.view_mode_combo.addItems(["Asymmetric Unit", "Whole Molecule", "Packing"])
-        self.view_mode_combo.currentTextChanged.connect(self.render)
-        self.view_mode_combo.currentTextChanged.connect(self.save_settings)
         view_row.addWidget(view_label)
-        view_row.addWidget(self.view_mode_combo, 1)
+        
+        self.view_mode_group = QButtonGroup(self)
+        self.radio_asym = QRadioButton("Asymmetric Unit")
+        self.radio_mol = QRadioButton("Whole Molecule")
+        self.radio_pack = QRadioButton("Packing")
+        
+        self.view_mode_group.addButton(self.radio_asym)
+        self.view_mode_group.addButton(self.radio_mol)
+        self.view_mode_group.addButton(self.radio_pack)
+        
+        self.radio_asym.toggled.connect(self._on_view_mode_changed)
+        self.radio_mol.toggled.connect(self._on_view_mode_changed)
+        self.radio_pack.toggled.connect(self._on_view_mode_changed)
+        
+        view_row.addWidget(self.radio_asym)
+        view_row.addWidget(self.radio_mol)
+        view_row.addWidget(self.radio_pack)
         struct_layout.addLayout(view_row)
+
+        struct_layout.addStretch(1)
 
         self.summary_label = QLabel(
             "Load a CIF file to visualize the completed unit cell and supercell."
@@ -184,7 +200,6 @@ class CifViewerWidget(QWidget):
         self.export_button = QPushButton("Export Supercell CIF...")
         self.export_button.clicked.connect(self._export_supercell)
         struct_layout.addWidget(self.export_button)
-        struct_layout.addStretch(1)
 
         self.tabs.addTab(struct_tab, "Structure")
 
@@ -514,10 +529,46 @@ class CifViewerWidget(QWidget):
         button_row.addWidget(reset_defaults_button)
         layout.addLayout(button_row)
 
+    def _get_current_view_mode(self) -> str:
+        if self.radio_asym.isChecked():
+            return "Asymmetric Unit"
+        elif self.radio_mol.isChecked():
+            return "Whole Molecule"
+        elif self.radio_pack.isChecked():
+            return "Packing"
+        return "Asymmetric Unit"
+
+    def _set_current_view_mode(self, mode: str):
+        self.radio_asym.blockSignals(True)
+        self.radio_mol.blockSignals(True)
+        self.radio_pack.blockSignals(True)
+        if mode == "Asymmetric Unit":
+            self.radio_asym.setChecked(True)
+        elif mode == "Whole Molecule":
+            self.radio_mol.setChecked(True)
+        elif mode == "Packing":
+            self.radio_pack.setChecked(True)
+        self.radio_asym.blockSignals(False)
+        self.radio_mol.blockSignals(False)
+        self.radio_pack.blockSignals(False)
+        if hasattr(self, "show_cell"):
+            self.show_cell.setEnabled(mode == "Packing")
+
+    def _on_view_mode_changed(self):
+        if not self.sender().isChecked():
+            return
+        mode = self._get_current_view_mode()
+        if hasattr(self, "show_cell"):
+            self.show_cell.setEnabled(mode == "Packing")
+        self._reset_camera_on_next_render = True
+        self.save_settings()
+        self.render()
+
     def _on_tab_changed(self, index):
         tab_text = self.tabs.tabText(index)
         if tab_text == "Supercell":
-            self.view_mode_combo.setCurrentText("Packing")
+            if not self.radio_pack.isChecked():
+                self.radio_pack.setChecked(True)
 
     def _repeat_spin(self):
         spin = QSpinBox()
@@ -628,7 +679,9 @@ class CifViewerWidget(QWidget):
         self.axis_font.blockSignals(True)
         self.axis_font_size.blockSignals(True)
         self.ellipsoid_ring_width.blockSignals(True)
-        self.view_mode_combo.blockSignals(True)
+        self.radio_asym.blockSignals(True)
+        self.radio_mol.blockSignals(True)
+        self.radio_pack.blockSignals(True)
 
         try:
             self.show_bonds.setChecked(True)
@@ -648,9 +701,8 @@ class CifViewerWidget(QWidget):
                 self.axis_font.setCurrentIndex(idx)
             self.axis_font_size.setValue(20)
             
-            idx_v = self.view_mode_combo.findText("Asymmetric Unit")
-            if idx_v >= 0:
-                self.view_mode_combo.setCurrentIndex(idx_v)
+            self.radio_asym.setChecked(True)
+            self.show_cell.setEnabled(False)
             
             self._set_button_color(self.color_axis_a, "#ff0000")
             self._set_button_color(self.color_axis_b, "#00ff00")
@@ -672,7 +724,9 @@ class CifViewerWidget(QWidget):
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
             self.ellipsoid_ring_width.blockSignals(False)
-            self.view_mode_combo.blockSignals(False)
+            self.radio_asym.blockSignals(False)
+            self.radio_mol.blockSignals(False)
+            self.radio_pack.blockSignals(False)
             
         self.save_settings()
         self.render()
@@ -840,16 +894,14 @@ class CifViewerWidget(QWidget):
             self.axis_font.blockSignals(True)
             self.axis_font_size.blockSignals(True)
             self.ellipsoid_ring_width.blockSignals(True)
-            self.view_mode_combo.blockSignals(True)
+            self.radio_asym.blockSignals(True)
+            self.radio_mol.blockSignals(True)
+            self.radio_pack.blockSignals(True)
             
             if "view_mode" in data:
-                idx = self.view_mode_combo.findText(str(data["view_mode"]))
-                if idx >= 0:
-                    self.view_mode_combo.setCurrentIndex(idx)
+                self._set_current_view_mode(str(data["view_mode"]))
             else:
-                idx = self.view_mode_combo.findText("Asymmetric Unit")
-                if idx >= 0:
-                    self.view_mode_combo.setCurrentIndex(idx)
+                self._set_current_view_mode("Asymmetric Unit")
                     
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
@@ -919,13 +971,15 @@ class CifViewerWidget(QWidget):
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
             self.ellipsoid_ring_width.blockSignals(False)
-            self.view_mode_combo.blockSignals(False)
-
+            self.radio_asym.blockSignals(False)
+            self.radio_mol.blockSignals(False)
+            self.radio_pack.blockSignals(False)
+ 
     def save_settings(self, *args):
         path = self._settings_path()
         import json
         data = {
-            "view_mode": self.view_mode_combo.currentText(),
+            "view_mode": self._get_current_view_mode(),
             "show_bonds": self.show_bonds.isChecked(),
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
@@ -974,6 +1028,13 @@ class CifViewerWidget(QWidget):
         self._reset_camera_on_next_render = True
         self.current_path = path
         self.file_label.setText(os.path.basename(path))
+        
+        mw = self._main_window()
+        if mw is not None:
+            if hasattr(mw, "init_manager"):
+                mw.init_manager.current_file_path = path
+            if hasattr(mw, "state_manager") and hasattr(mw.state_manager, "update_window_title"):
+                mw.state_manager.update_window_title()
         
         self.structure_table.blockSignals(True)
         self.structure_table.setRowCount(len(self.all_structures))
@@ -1027,7 +1088,7 @@ class CifViewerWidget(QWidget):
 
         self.clear_view(redraw=False)
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
-        if self.show_cell.isChecked() and self.view_mode_combo.currentText() == "Packing":
+        if self.show_cell.isChecked() and self._get_current_view_mode() == "Packing":
             self._draw_cell_overlay(plotter, repeats)
 
         try:
@@ -1053,7 +1114,7 @@ class CifViewerWidget(QWidget):
         self.clear_view()
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
         
-        view_mode = self.view_mode_combo.currentText()
+        view_mode = self._get_current_view_mode()
         if view_mode == "Asymmetric Unit" or view_mode == "Whole Molecule":
             base_atoms = self.structure.asymmetric_atoms if self.structure.asymmetric_atoms is not None else self.structure.atoms
         else:
@@ -1109,15 +1170,16 @@ class CifViewerWidget(QWidget):
 
             self.clear_view()
 
-            if self.show_cell.isChecked() and self.view_mode_combo.currentText() == "Packing":
+            if self.show_cell.isChecked() and self._get_current_view_mode() == "Packing":
                 self._draw_cell_overlay(plotter, repeats)
 
             try:
                 if getattr(self, "_reset_camera_on_next_render", True):
                     plotter.reset_camera()
                     self._reset_camera_on_next_render = False
-                if hasattr(plotter, "camera"):
-                    plotter.camera.focal_point = self._cell_center(repeats)
+                else:
+                    if hasattr(plotter, "camera"):
+                        plotter.camera.focal_point = self._cell_center(repeats)
                 plotter.render()
             except Exception:
                 pass

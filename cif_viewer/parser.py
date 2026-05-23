@@ -92,6 +92,7 @@ class RenderAtom:
     position: np.ndarray
     disorder_group: Optional[str] = None
     disorder_assembly: Optional[str] = None
+    is_original_asym: bool = False
 
     @property
     def disorder_key(self) -> Optional[str]:
@@ -836,6 +837,18 @@ def grow_molecules(
                     continue
 
         for op in symops:
+            is_identity = False
+            try:
+                if np.allclose(op.rotation_matrix, np.eye(3)) and np.allclose(op.translation_vector, np.zeros(3)):
+                    is_identity = True
+            except Exception:
+                try:
+                    test_pt = np.array([0.123, 0.456, 0.789])
+                    if np.allclose(op.operate(test_pt), test_pt):
+                        is_identity = True
+                except Exception:
+                    pass
+
             frac_sym = op.operate(atom.fract)
             
             for tx in (-1, 0, 1):
@@ -844,6 +857,8 @@ def grow_molecules(
                         frac_trans = frac_sym + np.array([tx, ty, tz], dtype=float)
                         cart = frac_trans @ structure.lattice
                         
+                        is_original_asym = (is_identity and tx == 0 and ty == 0 and tz == 0)
+                        
                         candidate_atoms.append(RenderAtom(
                             label=atom.label,
                             element=atom.element,
@@ -851,7 +866,8 @@ def grow_molecules(
                             image=(tx, ty, tz),
                             position=cart,
                             disorder_group=atom.disorder_group,
-                            disorder_assembly=atom.disorder_assembly
+                            disorder_assembly=atom.disorder_assembly,
+                            is_original_asym=is_original_asym
                         ))
 
     if not candidate_atoms:
@@ -883,10 +899,10 @@ def grow_molecules(
                         queue.append(neighbor)
             components.append(comp)
 
-    # Keep components which contain at least one atom in the central unit cell (image = 0,0,0)
+    # Keep components which contain at least one original asymmetric unit atom (is_original_asym == True)
     kept_indices = []
     for comp in components:
-        if any(candidate_atoms[idx].image == (0, 0, 0) for idx in comp):
+        if any(candidate_atoms[idx].is_original_asym for idx in comp):
             kept_indices.extend(comp)
 
     if not kept_indices:

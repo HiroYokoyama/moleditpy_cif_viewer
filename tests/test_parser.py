@@ -588,6 +588,37 @@ C2 C 0.05 0.5 0.5
     assert len(bonds) == 2
 
 
+def test_grow_molecules_connected_only():
+    from cif_viewer.parser import grow_molecules, parse_cif
+    import numpy as np
+    cif = """
+data_p21_test
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_H-M_alt 'P 1 21 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+    
+    # Under P 1 21 1, there are 2 symmetry operations.
+    # The generated atoms are disconnected, so only the original one (or its connections) is kept.
+    assert len(atoms) == 1
+    assert atoms[0].label == "C1"
+    assert np.allclose(atoms[0].position, np.array([1.0, 1.0, 1.0]))
+
+
+
 
 
 
