@@ -159,7 +159,7 @@ class CifViewerWidget(QWidget):
         disorder_row = QHBoxLayout()
         self.disorder_label = QLabel("Disorder Part:")
         self.disorder_combo = QComboBox()
-        self.disorder_combo.currentTextChanged.connect(self.render)
+        self.disorder_combo.currentTextChanged.connect(self._on_disorder_changed)
         disorder_row.addWidget(self.disorder_label)
         disorder_row.addWidget(self.disorder_combo, 1)
         self.disorder_label.setVisible(False)
@@ -562,6 +562,10 @@ class CifViewerWidget(QWidget):
             self.show_cell.setEnabled(mode == "Packing")
         self._reset_camera_on_next_render = True
         self.save_settings()
+        self.render()
+
+    def _on_disorder_changed(self):
+        self._reset_camera_on_next_render = True
         self.render()
 
     def _on_tab_changed(self, index):
