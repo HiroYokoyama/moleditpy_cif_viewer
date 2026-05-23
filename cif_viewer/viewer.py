@@ -164,6 +164,17 @@ class CifViewerWidget(QWidget):
         self.disorder_combo.setVisible(False)
         struct_layout.addLayout(disorder_row)
 
+        # Display mode row
+        view_row = QHBoxLayout()
+        view_label = QLabel("Display Mode:")
+        self.view_mode_combo = QComboBox()
+        self.view_mode_combo.addItems(["Asymmetric Unit", "Whole Molecule", "Packing"])
+        self.view_mode_combo.currentTextChanged.connect(self.render)
+        self.view_mode_combo.currentTextChanged.connect(self.save_settings)
+        view_row.addWidget(view_label)
+        view_row.addWidget(self.view_mode_combo, 1)
+        struct_layout.addLayout(view_row)
+
         self.summary_label = QLabel(
             "Load a CIF file to visualize the completed unit cell and supercell."
         )
@@ -176,6 +187,7 @@ class CifViewerWidget(QWidget):
         struct_layout.addStretch(1)
 
         self.tabs.addTab(struct_tab, "Structure")
+
 
         # --- Tab 2: Info (Refinement & Cell Metadata) ---
         info_tab = QScrollArea()
@@ -486,6 +498,7 @@ class CifViewerWidget(QWidget):
         self.tabs.addTab(cell_axes_tab, "Cell / Axes")
 
         layout.addWidget(self.tabs)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         # Bottom buttons
         button_row = QHBoxLayout()
@@ -500,6 +513,11 @@ class CifViewerWidget(QWidget):
         button_row.addWidget(clear_button)
         button_row.addWidget(reset_defaults_button)
         layout.addLayout(button_row)
+
+    def _on_tab_changed(self, index):
+        tab_text = self.tabs.tabText(index)
+        if tab_text == "Supercell":
+            self.view_mode_combo.setCurrentText("Packing")
 
     def _repeat_spin(self):
         spin = QSpinBox()
@@ -610,6 +628,7 @@ class CifViewerWidget(QWidget):
         self.axis_font.blockSignals(True)
         self.axis_font_size.blockSignals(True)
         self.ellipsoid_ring_width.blockSignals(True)
+        self.view_mode_combo.blockSignals(True)
 
         try:
             self.show_bonds.setChecked(True)
@@ -628,6 +647,10 @@ class CifViewerWidget(QWidget):
             if idx >= 0:
                 self.axis_font.setCurrentIndex(idx)
             self.axis_font_size.setValue(20)
+            
+            idx_v = self.view_mode_combo.findText("Asymmetric Unit")
+            if idx_v >= 0:
+                self.view_mode_combo.setCurrentIndex(idx_v)
             
             self._set_button_color(self.color_axis_a, "#ff0000")
             self._set_button_color(self.color_axis_b, "#00ff00")
@@ -649,6 +672,7 @@ class CifViewerWidget(QWidget):
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
             self.ellipsoid_ring_width.blockSignals(False)
+            self.view_mode_combo.blockSignals(False)
             
         self.save_settings()
         self.render()
@@ -816,7 +840,17 @@ class CifViewerWidget(QWidget):
             self.axis_font.blockSignals(True)
             self.axis_font_size.blockSignals(True)
             self.ellipsoid_ring_width.blockSignals(True)
+            self.view_mode_combo.blockSignals(True)
             
+            if "view_mode" in data:
+                idx = self.view_mode_combo.findText(str(data["view_mode"]))
+                if idx >= 0:
+                    self.view_mode_combo.setCurrentIndex(idx)
+            else:
+                idx = self.view_mode_combo.findText("Asymmetric Unit")
+                if idx >= 0:
+                    self.view_mode_combo.setCurrentIndex(idx)
+                    
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
             if "show_hydrogens" in data:
@@ -885,11 +919,13 @@ class CifViewerWidget(QWidget):
             self.axis_font.blockSignals(False)
             self.axis_font_size.blockSignals(False)
             self.ellipsoid_ring_width.blockSignals(False)
+            self.view_mode_combo.blockSignals(False)
 
     def save_settings(self, *args):
         path = self._settings_path()
         import json
         data = {
+            "view_mode": self.view_mode_combo.currentText(),
             "show_bonds": self.show_bonds.isChecked(),
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
@@ -991,7 +1027,7 @@ class CifViewerWidget(QWidget):
 
         self.clear_view(redraw=False)
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
-        if self.show_cell.isChecked():
+        if self.show_cell.isChecked() and self.view_mode_combo.currentText() == "Packing":
             self._draw_cell_overlay(plotter, repeats)
 
         try:
@@ -1017,24 +1053,38 @@ class CifViewerWidget(QWidget):
         self.clear_view()
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
         
-        structure_to_render = self.structure
+        view_mode = self.view_mode_combo.currentText()
+        if view_mode == "Asymmetric Unit" or view_mode == "Whole Molecule":
+            base_atoms = self.structure.asymmetric_atoms if self.structure.asymmetric_atoms is not None else self.structure.atoms
+        else:
+            base_atoms = self.structure.atoms
+
         selected_key = None
         if self.disorder_combo.isVisible() and self.disorder_combo.currentIndex() > 0:
             selected_key = self.disorder_combo.currentData()
             
         if selected_key is not None:
-            filtered_atoms = [
-                atom for atom in self.structure.atoms
+            base_atoms = [
+                atom for atom in base_atoms
                 if atom.disorder_group is None or atom.disorder_group == selected_key or atom.disorder_key == selected_key
             ]
-            import dataclasses
-            structure_to_render = dataclasses.replace(self.structure, atoms=tuple(filtered_atoms))
 
-        atoms, bonds = expand_supercell(
-            structure_to_render,
-            repeats,
-            keep_connected=self.keep_connected.isChecked(),
+        import dataclasses
+        structure_to_render = dataclasses.replace(
+            self.structure,
+            atoms=tuple(base_atoms),
+            asymmetric_atoms=tuple(base_atoms)
         )
+
+        if view_mode == "Whole Molecule":
+            from .parser import grow_molecules
+            atoms, bonds = grow_molecules(structure_to_render, selected_disorder_key=selected_key)
+        else:
+            atoms, bonds = expand_supercell(
+                structure_to_render,
+                repeats,
+                keep_connected=self.keep_connected.isChecked(),
+            )
         if not self.show_hydrogens.isChecked():
             atoms = [atom for atom in atoms if atom.element != "H"]
             from .parser import infer_bonds
@@ -1059,7 +1109,7 @@ class CifViewerWidget(QWidget):
 
             self.clear_view()
 
-            if self.show_cell.isChecked():
+            if self.show_cell.isChecked() and self.view_mode_combo.currentText() == "Packing":
                 self._draw_cell_overlay(plotter, repeats)
 
             try:

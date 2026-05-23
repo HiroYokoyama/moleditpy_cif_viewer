@@ -535,6 +535,60 @@ C1 C 0.1 0.1 0.1
     assert struct.wr2_all == "0.1798"
 
 
+def test_grow_molecules():
+    from cif_viewer.parser import grow_molecules, parse_cif
+    cif = """
+data_water
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+O1 O 0.5 0.5 0.5
+H1 H 0.4 0.5 0.5
+H2 H 0.6 0.5 0.5
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+    assert len(atoms) == 3
+    assert len(bonds) == 2
+
+
+def test_grow_molecules_boundary():
+    from cif_viewer.parser import grow_molecules, parse_cif
+    cif = """
+data_boundary_grow
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.95 0.5 0.5
+C2 C 0.05 0.5 0.5
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+    assert len(atoms) == 4
+    assert len(bonds) == 2
+
+
+
 
 
 

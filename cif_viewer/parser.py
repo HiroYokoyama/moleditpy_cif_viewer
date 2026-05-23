@@ -79,6 +79,7 @@ class CifStructure:
     wr2_all: Optional[str] = None
     z_prime: Optional[str] = None
     flack: Optional[str] = None
+    asymmetric_atoms: Optional[Tuple[CifAtom, ...]] = None
 
 
 
@@ -247,6 +248,58 @@ def _count_symops_from_loops(loops) -> int:
             }:
                 return len(rows)
     return 0
+
+
+def _parse_asymmetric_atoms(block_data_lower, lattice: np.ndarray, label_to_disorder: dict) -> List[CifAtom]:
+    atoms = []
+    if "_atom_site_label" in block_data_lower:
+        labels = block_data_lower["_atom_site_label"]
+        fx = block_data_lower.get("_atom_site_fract_x", [])
+        fy = block_data_lower.get("_atom_site_fract_y", [])
+        fz = block_data_lower.get("_atom_site_fract_z", [])
+        elements = block_data_lower.get("_atom_site_type_symbol", [])
+        occupancies = block_data_lower.get("_atom_site_occupancy", [])
+        
+        # Ensure lists are aligned
+        num_labels = len(labels)
+        for idx_lbl in range(num_labels):
+            try:
+                if idx_lbl >= len(fx) or idx_lbl >= len(fy) or idx_lbl >= len(fz):
+                    continue
+                clean_lbl = str(labels[idx_lbl]).strip().strip("'\"")
+                x = parse_cif_number(fx[idx_lbl])
+                y = parse_cif_number(fy[idx_lbl])
+                z = parse_cif_number(fz[idx_lbl])
+                fract = np.array([x, y, z], dtype=float)
+                cart = fract @ lattice
+                
+                el = "X"
+                if idx_lbl < len(elements):
+                    el = normalize_element(elements[idx_lbl])
+                else:
+                    el = normalize_element(clean_lbl)
+                
+                occ = None
+                if idx_lbl < len(occupancies):
+                    try:
+                        occ = parse_cif_number(occupancies[idx_lbl])
+                    except ValueError:
+                        pass
+                
+                g, a = label_to_disorder.get(clean_lbl, (None, None))
+                
+                atoms.append(CifAtom(
+                    label=clean_lbl,
+                    element=el,
+                    fract=fract,
+                    cart=cart,
+                    occupancy=occ,
+                    disorder_group=g,
+                    disorder_assembly=a
+                ))
+            except Exception:
+                pass
+    return atoms
 
 
 def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
@@ -497,6 +550,8 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
 
             metadata = _extract_metadata(lambda keys: _get_first_tag_value(block_data_lower, keys), num_symops=num_symops)
 
+            asym_atoms = _parse_asymmetric_atoms(block_data_lower, struct.lattice.matrix, label_to_disorder)
+
             cif_struct = _structure_from_pymatgen(
                 struct,
                 name or "Structure",
@@ -509,6 +564,7 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 r1=r1,
                 wr2=wr2,
                 goof=goof,
+                asymmetric_atoms=tuple(asym_atoms) if asym_atoms else None,
                 **metadata
             )
 
@@ -531,6 +587,7 @@ def _structure_from_pymatgen(
     r1: Optional[str] = None,
     wr2: Optional[str] = None,
     goof: Optional[str] = None,
+    asymmetric_atoms: Optional[Tuple[CifAtom, ...]] = None,
     **kwargs,
 ) -> CifStructure:
     cell_lengths = struct.lattice.lengths
@@ -576,6 +633,7 @@ def _structure_from_pymatgen(
         wr2=wr2,
         goof=goof,
         is_asymmetric_unit_only=False,
+        asymmetric_atoms=asymmetric_atoms,
         **kwargs
     )
 
@@ -662,6 +720,7 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
         wr2=wr2,
         goof=goof,
         is_asymmetric_unit_only=True,
+        asymmetric_atoms=tuple(atoms),
         **metadata
     )
 
@@ -723,6 +782,128 @@ def expand_supercell(
                     )
 
     return atoms, infer_bonds(atoms)
+
+
+def get_space_group_operations(structure: CifStructure) -> list:
+    """Helper to get SpaceGroup symmetry operations using pymatgen."""
+    symops = []
+    if structure.space_group:
+        try:
+            from pymatgen.symmetry.groups import SpaceGroup
+            sg = SpaceGroup(structure.space_group)
+            symops = sg.symmetry_ops
+        except Exception:
+            pass
+    if not symops:
+        try:
+            from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+            from pymatgen.core import Structure
+            
+            species = [atom.element for atom in structure.atoms]
+            coords = [atom.fract for atom in structure.atoms]
+            pm_struct = Structure(structure.lattice, species, coords)
+            sga = SpacegroupAnalyzer(pm_struct)
+            symops = sga.get_space_group_operations()
+        except Exception:
+            pass
+    return symops
+
+
+def grow_molecules(
+    structure: CifStructure,
+    selected_disorder_key: Optional[str] = None,
+) -> Tuple[List[RenderAtom], List[Tuple[int, int]]]:
+    """
+    Grow molecules to completion by applying symmetry operations and translations.
+    Returns only completed molecules that intersect the central unit cell.
+    """
+    core_atoms = structure.asymmetric_atoms if structure.asymmetric_atoms is not None else structure.atoms
+    if not core_atoms:
+        return [], []
+
+    symops = get_space_group_operations(structure)
+    if not symops:
+        from pymatgen.core.operations import SymmOp
+        symops = [SymmOp.valueOf("x, y, z")]
+
+    candidate_atoms: List[RenderAtom] = []
+    
+    # Generate candidate atoms in a 3x3x3 block of cells
+    for base_index, atom in enumerate(core_atoms):
+        if selected_disorder_key is not None:
+            if atom.disorder_group is not None:
+                if atom.disorder_group != selected_disorder_key and atom.disorder_key != selected_disorder_key:
+                    continue
+
+        for op in symops:
+            frac_sym = op.operate(atom.fract)
+            
+            for tx in (-1, 0, 1):
+                for ty in (-1, 0, 1):
+                    for tz in (-1, 0, 1):
+                        frac_trans = frac_sym + np.array([tx, ty, tz], dtype=float)
+                        cart = frac_trans @ structure.lattice
+                        
+                        candidate_atoms.append(RenderAtom(
+                            label=atom.label,
+                            element=atom.element,
+                            base_index=base_index,
+                            image=(tx, ty, tz),
+                            position=cart,
+                            disorder_group=atom.disorder_group,
+                            disorder_assembly=atom.disorder_assembly
+                        ))
+
+    if not candidate_atoms:
+        return [], []
+
+    # Build bonds between all candidates
+    bonds = infer_bonds(candidate_atoms)
+    
+    # Run BFS/DFS to identify components
+    num_atoms = len(candidate_atoms)
+    adj = {i: [] for i in range(num_atoms)}
+    for u, v in bonds:
+        adj[u].append(v)
+        adj[v].append(u)
+        
+    visited = [False] * num_atoms
+    components = []
+    for i in range(num_atoms):
+        if not visited[i]:
+            comp = []
+            queue = [i]
+            visited[i] = True
+            while queue:
+                curr = queue.pop(0)
+                comp.append(curr)
+                for neighbor in adj[curr]:
+                    if not visited[neighbor]:
+                        visited[neighbor] = True
+                        queue.append(neighbor)
+            components.append(comp)
+
+    # Keep components which contain at least one atom in the central unit cell (image = 0,0,0)
+    kept_indices = []
+    for comp in components:
+        if any(candidate_atoms[idx].image == (0, 0, 0) for idx in comp):
+            kept_indices.extend(comp)
+
+    if not kept_indices:
+        return [], []
+
+    kept_indices.sort()
+    
+    final_atoms = [candidate_atoms[idx] for idx in kept_indices]
+    
+    # Re-index bonds
+    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(kept_indices)}
+    final_bonds = []
+    for u, v in bonds:
+        if u in old_to_new and v in old_to_new:
+            final_bonds.append((old_to_new[u], old_to_new[v]))
+
+    return final_atoms, final_bonds
 
 
 def unwrap_connected_atoms(structure: CifStructure) -> List[CifAtom]:
