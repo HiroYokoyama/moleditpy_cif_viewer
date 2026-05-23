@@ -586,6 +586,8 @@ def test_cif_viewer_widget_initialization(qtbot):
     assert widget.repeat_a.value() == 1
     assert widget.show_bonds.isChecked() is True
     assert widget._get_current_view_mode() == "Whole Molecule"
+    assert widget.show_cell.isEnabled() is False
+    assert widget.show_axes.isEnabled() is False
 
 
 def test_cif_viewer_widget_load_cif(qtbot, tmp_path):
@@ -692,6 +694,8 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     assert widget.show_axes.isChecked() is True
     assert widget.show_ellipsoid_rings.isChecked() is True
     assert widget.fix_h_size.isChecked() is True
+    assert widget.show_cell.isEnabled() is False
+    assert widget.show_axes.isEnabled() is False
     assert widget.probability_spin.value() == 50.0
     assert widget.h_scale_spin.value() == 20.0
     assert widget.axis_width.value() == 5

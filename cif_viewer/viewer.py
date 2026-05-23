@@ -594,6 +594,8 @@ class CifViewerWidget(QWidget):
         self.radio_pack.blockSignals(False)
         if hasattr(self, "show_cell"):
             self.show_cell.setEnabled(mode == "Packing")
+        if hasattr(self, "show_axes"):
+            self.show_axes.setEnabled(mode == "Packing")
 
     def _on_view_mode_changed(self):
         if not self.sender().isChecked():
@@ -601,12 +603,12 @@ class CifViewerWidget(QWidget):
         mode = self._get_current_view_mode()
         if hasattr(self, "show_cell"):
             self.show_cell.setEnabled(mode == "Packing")
-        self._reset_camera_on_next_render = True
+        if hasattr(self, "show_axes"):
+            self.show_axes.setEnabled(mode == "Packing")
         self.save_settings()
         self.render()
 
     def _on_disorder_changed(self):
-        self._reset_camera_on_next_render = True
         self.render()
 
     def _on_tab_changed(self, index):
@@ -747,6 +749,7 @@ class CifViewerWidget(QWidget):
 
             self.radio_mol.setChecked(True)
             self.show_cell.setEnabled(False)
+            self.show_axes.setEnabled(False)
 
             self._set_button_color(self.color_axis_a, "#ff0000")
             self._set_button_color(self.color_axis_b, "#00ff00")
@@ -960,6 +963,7 @@ class CifViewerWidget(QWidget):
         return os.path.join(os.path.dirname(__file__), "settings.json")
 
     def load_settings(self):
+        self._set_current_view_mode("Whole Molecule")
         path = self._settings_path()
         if not os.path.exists(path):
             return
@@ -1191,8 +1195,6 @@ class CifViewerWidget(QWidget):
             self._draw_cell_overlay(plotter, repeats)
 
         try:
-            if hasattr(plotter, "camera"):
-                plotter.camera.focal_point = self._cell_center(repeats)
             plotter.render()
         except Exception as exc:
             logging.debug("Failed to render overlays: %s", exc)
@@ -1294,9 +1296,6 @@ class CifViewerWidget(QWidget):
                 if getattr(self, "_reset_camera_on_next_render", True):
                     plotter.reset_camera()
                     self._reset_camera_on_next_render = False
-                else:
-                    if hasattr(plotter, "camera"):
-                        plotter.camera.focal_point = self._cell_center(repeats)
                 plotter.render()
             except Exception as exc:
                 logging.error("Failed to reset camera or render cell: %s", exc)
