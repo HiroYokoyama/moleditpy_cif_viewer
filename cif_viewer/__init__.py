@@ -1,7 +1,7 @@
 import logging
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.7.0"
+PLUGIN_VERSION = "0.8.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -86,7 +86,7 @@ def initialize(context):
 
         dock = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
         if dock is None:
-            dock = QDockWidget("CIF Viewer", main_window)
+            dock = QDockWidget(f"CIF Viewer v{PLUGIN_VERSION}", main_window)
             dock.setAllowedAreas(
                 Qt.DockWidgetArea.LeftDockWidgetArea
                 | Qt.DockWidgetArea.RightDockWidgetArea
