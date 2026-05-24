@@ -269,10 +269,9 @@ class CifViewerWidget(QWidget):
         self.disorder_combo.setVisible(False)
         struct_layout.addLayout(disorder_row)
 
-        # Display mode row
-        view_row = QHBoxLayout()
-        view_label = QLabel("Display Mode:")
-        view_row.addWidget(view_label)
+        # Display mode group
+        mode_group = QGroupBox("Display Mode")
+        mode_group_layout = QVBoxLayout()
 
         self.view_mode_group = QButtonGroup(self)
         self.radio_mol = QRadioButton("Whole Molecule")
@@ -287,10 +286,12 @@ class CifViewerWidget(QWidget):
         self.radio_asym.toggled.connect(self._on_view_mode_changed)
         self.radio_pack.toggled.connect(self._on_view_mode_changed)
 
-        view_row.addWidget(self.radio_mol)
-        view_row.addWidget(self.radio_asym)
-        view_row.addWidget(self.radio_pack)
-        struct_layout.addLayout(view_row)
+        mode_group_layout.addWidget(self.radio_mol)
+        mode_group_layout.addWidget(self.radio_asym)
+        mode_group_layout.addWidget(self.radio_pack)
+
+        mode_group.setLayout(mode_group_layout)
+        struct_layout.addWidget(mode_group)
 
         style_group = QGroupBox("Display Style")
         style_group_layout = QVBoxLayout()
@@ -320,9 +321,6 @@ class CifViewerWidget(QWidget):
         self.bond_order_disabled_label.setVisible(False)
         style_group_layout.addWidget(self.bond_order_disabled_label)
 
-        style_group.setLayout(style_group_layout)
-        struct_layout.addWidget(style_group)
-
         max_atoms_row = QHBoxLayout()
         max_atoms_label = QLabel("Max number of atoms:")
         self.max_atoms_spin = QSpinBox()
@@ -337,7 +335,10 @@ class CifViewerWidget(QWidget):
         max_atoms_row.addWidget(max_atoms_label)
         max_atoms_row.addWidget(self.max_atoms_spin)
         max_atoms_row.addStretch(1)
-        struct_layout.addLayout(max_atoms_row)
+        style_group_layout.addLayout(max_atoms_row)
+
+        style_group.setLayout(style_group_layout)
+        struct_layout.addWidget(style_group)
 
         self.switch_ellipsoid_btn = QPushButton("Switch to Ellipsoids ▶")
         self.switch_ellipsoid_btn.clicked.connect(self._switch_to_ellipsoids)
