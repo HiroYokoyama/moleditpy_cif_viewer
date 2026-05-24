@@ -5,6 +5,7 @@ import math
 import re
 import shlex
 import logging
+import warnings
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -323,7 +324,19 @@ def _parse_asymmetric_atoms(
 def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
     from pymatgen.io.cif import CifParser
 
-    parser = CifParser(path)
+    # Suppress pymatgen/monty UserWarning emitted when a CIF uses a
+    # non-standard Hermann-Mauguin symbol (e.g. 'I1a1') that is not in
+    # pymatgen's full-symbol database.  The warning is cosmetic; pymatgen
+    # falls back to the short symbol automatically and parsing continues.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Full symbol not available",
+            category=UserWarning,
+            module="monty",
+        )
+        parser = CifParser(path)
+
     structures = []
 
     for name, block in parser._cif.data.items():
@@ -943,7 +956,7 @@ def grow_molecules(
     if not symops:
         from pymatgen.core.operations import SymmOp
 
-        symops = [SymmOp.from_xyz_string("x, y, z")]
+        symops = [SymmOp.from_xyz_str("x, y, z")]
 
     candidate_atoms: List[RenderAtom] = []
 
