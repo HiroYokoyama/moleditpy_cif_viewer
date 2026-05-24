@@ -151,6 +151,35 @@ def test_write_supercell_cif(tmp_path):
     np.testing.assert_allclose(frac_xs, [0.0, 0.25, 0.5, 0.75])
 
 
+def test_write_cif_no_cell(tmp_path):
+    from cif_viewer.parser import CifStructure, CifAtom
+
+    atom = CifAtom(
+        label="C1",
+        element="C",
+        fract=np.array([0.0, 0.0, 0.0]),
+        cart=np.array([1.2, 3.4, 5.6]),
+        occupancy=1.0,
+    )
+    structure = CifStructure(
+        name="NoCellStruct",
+        cell_lengths=(0.0, 0.0, 0.0),
+        cell_angles=(90.0, 90.0, 90.0),
+        lattice=None,
+        atoms=(atom,),
+    )
+    export_path = tmp_path / "nocell.cif"
+    write_supercell_cif(str(export_path), structure, (1, 1, 1), keep_connected=False)
+
+    content = export_path.read_text(encoding="utf-8")
+    assert "data_molecule" in content
+    assert "_cell_length_a" not in content
+    assert "_atom_site_Cartn_x" in content
+    assert "_atom_site_fract_x" not in content
+    assert "C1_0_0_0" in content
+    assert "1.200000 3.400000 5.600000" in content
+
+
 def test_render_atoms_to_rdkit_mol():
     from cif_viewer.rdkit_bridge import render_atoms_to_rdkit_mol
     from cif_viewer.parser import RenderAtom

@@ -1823,6 +1823,9 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
         asymmetric_atoms: list
         lattice: np.ndarray = dataclasses.field(default_factory=lambda: np.eye(3))
         space_group: Optional[str] = None
+        name: str = "Dummy"
+        cell_lengths: tuple = (10.0, 10.0, 10.0)
+        cell_angles: tuple = (90.0, 90.0, 90.0)
 
     widget.radio_mol.setChecked(True)
 

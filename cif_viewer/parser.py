@@ -1743,9 +1743,17 @@ def write_supercell_cif(
     selected_disorder_key: Optional[str] = None,
 ) -> None:
     """Export the expanded supercell crystal structure as a P1 symmetry CIF file."""
+    has_cell = (
+        structure.cell_lengths is not None
+        and not any(val == 0.0 for val in structure.cell_lengths)
+        and structure.lattice is not None
+    )
+
     repeat_a, repeat_b, repeat_c = repeats
     base_atoms = (
-        unwrap_connected_atoms(structure) if keep_connected else list(structure.atoms)
+        unwrap_connected_atoms(structure)
+        if (keep_connected and has_cell)
+        else list(structure.atoms)
     )
 
     if selected_disorder_key is not None:
@@ -1757,50 +1765,80 @@ def write_supercell_cif(
             or atom.disorder_key == selected_disorder_key
         ]
 
-    new_a = structure.cell_lengths[0] * repeat_a
-    new_b = structure.cell_lengths[1] * repeat_b
-    new_c = structure.cell_lengths[2] * repeat_c
-    alpha, beta, gamma = structure.cell_angles
-
     lines = [
-        "data_supercell",
-        "_audit_creation_method 'MoleditPy CIF Viewer Plugin Supercell Export'",
-        f"_cell_length_a {new_a:.6f}",
-        f"_cell_length_b {new_b:.6f}",
-        f"_cell_length_c {new_c:.6f}",
-        f"_cell_angle_alpha {alpha:.6f}",
-        f"_cell_angle_beta {beta:.6f}",
-        f"_cell_angle_gamma {gamma:.6f}",
-        "_symmetry_space_group_name_H-M 'P 1'",
-        "_symmetry_Int_Tables_number 1",
-        "",
-        "loop_",
-        "_symmetry_equiv_pos_as_xyz",
-        "'x, y, z'",
-        "",
-        "loop_",
-        "_atom_site_label",
-        "_atom_site_type_symbol",
-        "_atom_site_fract_x",
-        "_atom_site_fract_y",
-        "_atom_site_fract_z",
-        "_atom_site_occupancy",
+        "data_supercell" if has_cell else "data_molecule",
+        "_audit_creation_method 'MoleditPy CIF Viewer Plugin Supercell Export'"
+        if has_cell
+        else "_audit_creation_method 'MoleditPy CIF Viewer Plugin Export'",
     ]
+
+    if has_cell:
+        new_a = structure.cell_lengths[0] * repeat_a
+        new_b = structure.cell_lengths[1] * repeat_b
+        new_c = structure.cell_lengths[2] * repeat_c
+        alpha, beta, gamma = structure.cell_angles
+
+        lines.extend(
+            [
+                f"_cell_length_a {new_a:.6f}",
+                f"_cell_length_b {new_b:.6f}",
+                f"_cell_length_c {new_c:.6f}",
+                f"_cell_angle_alpha {alpha:.6f}",
+                f"_cell_angle_beta {beta:.6f}",
+                f"_cell_angle_gamma {gamma:.6f}",
+                "_symmetry_space_group_name_H-M 'P 1'",
+                "_symmetry_Int_Tables_number 1",
+                "",
+                "loop_",
+                "_symmetry_equiv_pos_as_xyz",
+                "'x, y, z'",
+                "",
+                "loop_",
+                "_atom_site_label",
+                "_atom_site_type_symbol",
+                "_atom_site_fract_x",
+                "_atom_site_fract_y",
+                "_atom_site_fract_z",
+                "_atom_site_occupancy",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "loop_",
+                "_atom_site_label",
+                "_atom_site_type_symbol",
+                "_atom_site_Cartn_x",
+                "_atom_site_Cartn_y",
+                "_atom_site_Cartn_z",
+                "_atom_site_occupancy",
+            ]
+        )
 
     for ia in range(repeat_a):
         for ib in range(repeat_b):
             for ic in range(repeat_c):
                 offset = np.array([ia, ib, ic], dtype=float)
                 for base_index, atom in enumerate(base_atoms):
-                    frac_super = (atom.fract + offset) / np.array(repeats, dtype=float)
-
-                    # Generate a unique clean label
                     clean_label = re.sub(r"[^a-zA-Z0-9]", "", atom.label)
                     label = f"{clean_label}_{ia}_{ib}_{ic}"
                     occ = atom.occupancy if atom.occupancy is not None else 1.0
-                    lines.append(
-                        f"{label:<12} {atom.element:<3} {frac_super[0]:.6f} {frac_super[1]:.6f} {frac_super[2]:.6f} {occ:.4f}"
-                    )
+
+                    if has_cell:
+                        frac_super = (atom.fract + offset) / np.array(
+                            repeats, dtype=float
+                        )
+                        lines.append(
+                            f"{label:<12} {atom.element:<3} {frac_super[0]:.6f} {frac_super[1]:.6f} {frac_super[2]:.6f} {occ:.4f}"
+                        )
+                    else:
+                        x, y, z = (
+                            atom.cart if atom.cart is not None else (0.0, 0.0, 0.0)
+                        )
+                        lines.append(
+                            f"{label:<12} {atom.element:<3} {x:.6f} {y:.6f} {z:.6f} {occ:.4f}"
+                        )
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

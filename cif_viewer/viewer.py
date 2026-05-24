@@ -165,11 +165,18 @@ class CifViewerWidget(QWidget):
                 # Convert RenderAtoms back to a 1x1x1 P1 structure for writing
                 from .parser import CifAtom
 
+                has_cell = (
+                    self.structure.cell_lengths is not None
+                    and not any(val == 0.0 for val in self.structure.cell_lengths)
+                    and self.structure.lattice is not None
+                )
                 p1_atoms = [
                     CifAtom(
                         label=a.label,
                         element=a.element,
-                        fract=a.position @ np.linalg.inv(self.structure.lattice),
+                        fract=a.position @ np.linalg.inv(self.structure.lattice)
+                        if has_cell
+                        else np.zeros(3),
                         cart=a.position,
                         occupancy=1.0,
                     )
@@ -284,6 +291,18 @@ class CifViewerWidget(QWidget):
         view_row.addWidget(self.radio_asym)
         view_row.addWidget(self.radio_pack)
         struct_layout.addLayout(view_row)
+
+        self.show_hydrogens = QCheckBox("Show hydrogen atoms")
+        self.show_hydrogens.setChecked(True)
+        self.show_hydrogens.toggled.connect(self.render)
+        self.show_hydrogens.toggled.connect(self.save_settings)
+        struct_layout.addWidget(self.show_hydrogens)
+
+        self.show_bonds = QCheckBox("Show bonds")
+        self.show_bonds.setChecked(True)
+        self.show_bonds.toggled.connect(self.render)
+        self.show_bonds.toggled.connect(self.save_settings)
+        struct_layout.addWidget(self.show_bonds)
 
         self.determine_bond_order = QCheckBox("Determine bond order (RDKit)")
         self.determine_bond_order.setChecked(False)
@@ -510,18 +529,6 @@ class CifViewerWidget(QWidget):
         self.keep_connected.toggled.connect(self.render)
         self.keep_connected.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.keep_connected)
-
-        self.show_bonds = QCheckBox("Show bonds")
-        self.show_bonds.setChecked(True)
-        self.show_bonds.toggled.connect(self.render)
-        self.show_bonds.toggled.connect(self.save_settings)
-        supercell_layout.addRow(self.show_bonds)
-
-        self.show_hydrogens = QCheckBox("Show hydrogen atoms")
-        self.show_hydrogens.setChecked(True)
-        self.show_hydrogens.toggled.connect(self.render)
-        self.show_hydrogens.toggled.connect(self.save_settings)
-        supercell_layout.addRow(self.show_hydrogens)
 
         preset_row = QHBoxLayout()
         btn_111 = QPushButton("1x1x1")
