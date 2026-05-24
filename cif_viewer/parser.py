@@ -943,7 +943,7 @@ def grow_molecules(
     if not symops:
         from pymatgen.core.operations import SymmOp
 
-        symops = [SymmOp.valueOf("x, y, z")]
+        symops = [SymmOp.from_xyz_string("x, y, z")]
 
     candidate_atoms: List[RenderAtom] = []
 

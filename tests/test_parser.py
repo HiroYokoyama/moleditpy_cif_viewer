@@ -190,7 +190,7 @@ def test_render_atoms_to_rdkit_mol_with_error():
     bonds = [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5)]
     mol = render_atoms_to_rdkit_mol(atoms, bonds, determine_bond_order=True)
     assert mol.HasProp("_bond_order_error")
-    assert "could not find valid bond ordering" in mol.GetProp("_bond_order_error")
+    assert "unable to determine valence" in mol.GetProp("_bond_order_error").lower()
 
 
 def test_parse_cif_file(tmp_path):

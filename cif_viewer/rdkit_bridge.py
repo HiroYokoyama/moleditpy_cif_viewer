@@ -36,10 +36,27 @@ def render_atoms_to_rdkit_mol(
             rdDetermineBonds.DetermineBondOrders(mol, charge=0)
             mol.SetProp("_bond_order_error", "")
         except Exception as exc:
-            import logging
+            import re
 
-            logging.warning("RDKit DetermineBondOrders failed: %s", exc)
-            mol.SetProp("_bond_order_error", str(exc))
+            err_msg = str(exc)
+            match = re.search(r"does not match input \(([\-\d]+)\)", err_msg)
+            if match:
+                expected_charge = int(match.group(1))
+                try:
+                    from rdkit.Chem import rdDetermineBonds
+
+                    rdDetermineBonds.DetermineBondOrders(mol, charge=expected_charge)
+                    mol.SetProp("_bond_order_error", "")
+                except Exception as exc2:
+                    import logging
+
+                    logging.warning("RDKit DetermineBondOrders retry failed: %s", exc2)
+                    mol.SetProp("_bond_order_error", str(exc2))
+            else:
+                import logging
+
+                logging.warning("RDKit DetermineBondOrders failed: %s", exc)
+                mol.SetProp("_bond_order_error", err_msg)
     else:
         mol.SetProp("_bond_order_error", "")
 

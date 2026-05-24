@@ -1811,12 +1811,14 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
             self.disorder_key = None
 
     import dataclasses
+    from typing import Optional
 
     @dataclasses.dataclass
     class DummyStructure:
         atoms: list
         asymmetric_atoms: list
         lattice: np.ndarray = dataclasses.field(default_factory=lambda: np.eye(3))
+        space_group: Optional[str] = None
 
     widget.radio_mol.setChecked(True)
 
