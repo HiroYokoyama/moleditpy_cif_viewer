@@ -1059,206 +1059,157 @@ def grow_molecules(
     tolerance: float = 0.45,
 ) -> Tuple[List[RenderAtom], List[Tuple[int, int]]]:
     """
-    Grow molecules to completion by applying symmetry operations and translations.
-    Returns only completed molecules that intersect the central unit cell.
+    Grow molecules by applying symmetry operations then unwrapping across
+    cell boundaries.
+
+    1. Apply all symops to the asymmetric unit, wrap into [0,1) → unique sites.
+    2. Call _infer_periodic_adjacency on those sites (reuses existing logic).
+    3. BFS with cumulative offset (same as unwrap_connected_atoms) → each
+       molecule is always contiguous, never split at a cell boundary.
+    4. Keep molecules that contain an original asymmetric-unit atom.
     """
-    if not structure.atoms:
+    core_atoms = (
+        structure.asymmetric_atoms
+        if structure.asymmetric_atoms is not None
+        else structure.atoms
+    )
+    if not core_atoms:
         return [], []
 
-    adjacency = _infer_periodic_adjacency(structure)
-
-    # Correct polymer detection: Check if a path leads back to a visited atom
-    # but in a different periodic image (indicating an infinite network).
-    is_polymer = False
-    visited_shifts = {}
-
-    for start_node in range(len(structure.atoms)):
-        if start_node in visited_shifts:
-            continue
-
-        queue = [(start_node, np.zeros(3, dtype=int))]
-        visited_shifts[start_node] = np.zeros(3, dtype=int)
-
-        while queue:
-            curr, curr_shift = queue.pop(0)
-
-            for neighbor, edge_shift in adjacency[curr]:
-                net_shift = curr_shift + edge_shift
-
-                if neighbor in visited_shifts:
-                    if not np.array_equal(visited_shifts[neighbor], net_shift):
-                        is_polymer = True
-                        break
-                else:
-                    visited_shifts[neighbor] = net_shift
-                    queue.append((neighbor, net_shift))
-
-            if is_polymer:
-                break
-        if is_polymer:
-            break
-
-    if is_polymer:
-        logging.info(
-            "Polymer structure detected (periodic bond via adjacency). "
-            "Displaying 1x1x1 unit cell for Whole Molecule mode."
-        )
-        return expand_supercell(
-            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
-        )
-
-    # CRITICAL FIX: Unwrap the asymmetric unit FIRST so scattered coordinate fragments
-    # are physically brought together before the symmetry generator multiplies them.
-    core_atoms = unwrap_connected_atoms(structure)
-
     symops = get_space_group_operations(structure)
-    if not symops or not structure.is_asymmetric_unit_only:
+    if not symops:
         from pymatgen.core.operations import SymmOp
 
         symops = [SymmOp.from_xyz_str("x, y, z")]
 
-    candidate_atoms: List[RenderAtom] = []
+    # --- Step 1: expand asymmetric unit via symops, wrap to [0,1), deduplicate ---
+    exp_atoms: List[CifAtom] = []
+    is_asym: List[bool] = []
+    seen_fracs: List[np.ndarray] = []
 
-    # Generate candidate atoms using the contiguous, unwrapped core
-    for base_index, atom in enumerate(core_atoms):
-        if selected_disorder_key is not None:
-            if atom.disorder_group is not None:
-                if (
-                    atom.disorder_group != selected_disorder_key
-                    and atom.disorder_key != selected_disorder_key
-                ):
-                    continue
+    for atom in core_atoms:
+        if selected_disorder_key is not None and atom.disorder_group is not None:
+            if (
+                atom.disorder_group != selected_disorder_key
+                and atom.disorder_key != selected_disorder_key
+            ):
+                continue
 
         for op in symops:
-            is_identity = False
+            # identity check
+            identity = False
             try:
-                if np.allclose(op.rotation_matrix, np.eye(3)) and np.allclose(
+                identity = np.allclose(op.rotation_matrix, np.eye(3)) and np.allclose(
                     op.translation_vector, np.zeros(3)
-                ):
-                    is_identity = True
-            except Exception as e:
-                logging.debug("Symmetry operation matrix check failed: %s", e)
+                )
+            except Exception:
                 try:
-                    test_pt = np.array([0.123, 0.456, 0.789])
-                    if np.allclose(op.operate(test_pt), test_pt):
-                        is_identity = True
-                except Exception as ex:
-                    logging.debug("Symmetry operation test point check failed: %s", ex)
+                    t = np.array([0.123, 0.456, 0.789])
+                    identity = np.allclose(op.operate(t), t)
+                except Exception:
+                    pass
 
-            # Get original U_cart for this base_index
-            u_cart_orig = getattr(atom, "u_cart", None)
-
-            # Compute rotated U_cart using the symmetry operation rotation matrix
+            # rotate ADP tensor
             u_cart_site = None
-            if u_cart_orig is not None and not np.allclose(u_cart_orig, 0.0):
+            u0 = getattr(atom, "u_cart", None)
+            if u0 is not None and not np.allclose(u0, 0.0):
                 try:
                     A = structure.lattice.T
-                    A_inv = np.linalg.inv(A)
-                    R = op.rotation_matrix
-                    R_cart = A @ R @ A_inv
-                    u_cart_site = R_cart @ u_cart_orig @ R_cart.T
-                except Exception as exc:
-                    logging.debug("Failed to rotate U_cart: %s", exc)
-                    u_cart_site = u_cart_orig
+                    R_cart = A @ op.rotation_matrix @ np.linalg.inv(A)
+                    u_cart_site = R_cart @ u0 @ R_cart.T
+                except Exception:
+                    u_cart_site = u0
 
-            frac_sym = op.operate(atom.fract)
+            frac = op.operate(atom.fract) % 1.0
 
-            for tx in (-1, 0, 1):
-                for ty in (-1, 0, 1):
-                    for tz in (-1, 0, 1):
-                        frac_trans = frac_sym + np.array([tx, ty, tz], dtype=float)
-                        cart = frac_trans @ structure.lattice
+            # deduplicate
+            dup = any(
+                np.linalg.norm((frac - p - np.round(frac - p)) @ structure.lattice)
+                < 0.05
+                for p in seen_fracs
+            )
+            if dup:
+                continue
+            seen_fracs.append(frac.copy())
 
-                        is_original_asym = (
-                            is_identity and tx == 0 and ty == 0 and tz == 0
-                        )
+            cart = frac @ structure.lattice
+            exp_atoms.append(
+                CifAtom(
+                    atom.label,
+                    atom.element,
+                    frac,
+                    cart,
+                    atom.occupancy,
+                    disorder_group=atom.disorder_group,
+                    disorder_assembly=atom.disorder_assembly,
+                    u_cart=u_cart_site,
+                )
+            )
+            is_asym.append(identity)
 
-                        candidate_atoms.append(
-                            RenderAtom(
-                                label=atom.label,
-                                element=atom.element,
-                                base_index=base_index,
-                                image=(tx, ty, tz),
-                                position=cart,
-                                disorder_group=atom.disorder_group,
-                                disorder_assembly=atom.disorder_assembly,
-                                is_original_asym=is_original_asym,
-                                u_cart=u_cart_site,
-                            )
-                        )
-
-    if not candidate_atoms:
+    if not exp_atoms:
         return [], []
 
-    # Build bonds between all candidates
-    bonds = infer_bonds(candidate_atoms, tolerance=tolerance)
+    # --- Step 2: periodic bond graph (reuse existing function) ---
+    tmp = CifStructure(
+        structure.name,
+        structure.cell_lengths,
+        structure.cell_angles,
+        structure.lattice,
+        tuple(exp_atoms),
+    )
+    adj = _infer_periodic_adjacency(tmp)
 
-    # Run BFS/DFS to identify components
-    num_atoms = len(candidate_atoms)
-    adj = {i: [] for i in range(num_atoms)}
-    for u, v in bonds:
-        adj[u].append(v)
-        adj[v].append(u)
+    # --- Step 3: BFS with offset tracking per molecule (= unwrap_connected_atoms) ---
+    N = len(exp_atoms)
+    visited = [False] * N
+    final_atoms: List[RenderAtom] = []
+    final_bonds: List[Tuple[int, int]] = []
+    atom_base = 0
 
-    components = None
-    try:
-        from rdkit import Chem
+    for start in range(N):
+        if visited[start]:
+            continue
+        visited[start] = True
+        offsets: Dict[int, np.ndarray] = {start: np.zeros(3, dtype=int)}
+        queue = [start]
+        mol: List[Tuple[int, np.ndarray]] = []
 
-        rw_mol = Chem.RWMol()
-        for _ in range(num_atoms):
-            rw_mol.AddAtom(Chem.Atom("C"))
+        while queue:
+            curr = queue.pop(0)
+            mol.append((curr, offsets[curr]))
+            for nb, shift in adj[curr]:
+                if nb not in offsets:
+                    offsets[nb] = offsets[curr] + shift
+                    visited[nb] = True
+                    queue.append(nb)
 
-        seen_bonds = set()
-        for u, v in bonds:
-            key = tuple(sorted((int(u), int(v))))
-            if key not in seen_bonds:
-                seen_bonds.add(key)
-                rw_mol.AddBond(key[0], key[1], Chem.BondType.SINGLE)
+        # --- Step 4: keep molecules touching the original asymmetric unit ---
+        if not any(is_asym[i] for i, _ in mol):
+            continue
 
-        mol_temp = rw_mol.GetMol()
-        components = Chem.GetMolFrags(mol_temp, asMols=False)
-    except Exception as exc:
-        logging.warning(
-            "RDKit component analysis failed, falling back to manual implementation: %s",
-            exc,
-        )
-
-    if components is None:
-        visited = [False] * num_atoms
-        components = []
-        for i in range(num_atoms):
-            if not visited[i]:
-                comp = []
-                queue = [i]
-                visited[i] = True
-                while queue:
-                    curr = queue.pop(0)
-                    comp.append(curr)
-                    for neighbor in adj[curr]:
-                        if not visited[neighbor]:
-                            visited[neighbor] = True
-                            queue.append(neighbor)
-                components.append(comp)
-
-    # Keep components which contain at least one original asymmetric unit atom (is_original_asym == True)
-    kept_indices = []
-    for comp in components:
-        if any(candidate_atoms[idx].is_original_asym for idx in comp):
-            kept_indices.extend(comp)
-
-    if not kept_indices:
-        return [], []
-
-    kept_indices.sort()
-
-    final_atoms = [candidate_atoms[idx] for idx in kept_indices]
-
-    # Re-index bonds
-    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(kept_indices)}
-    final_bonds = []
-    for u, v in bonds:
-        if u in old_to_new and v in old_to_new:
-            final_bonds.append((old_to_new[u], old_to_new[v]))
+        local: Dict[int, int] = {i: li for li, (i, _) in enumerate(mol)}
+        for li, (i, off) in enumerate(mol):
+            a = exp_atoms[i]
+            frac = a.fract + off
+            final_atoms.append(
+                RenderAtom(
+                    label=a.label,
+                    element=a.element,
+                    base_index=i,
+                    image=tuple(int(x) for x in off),
+                    position=frac @ structure.lattice,
+                    disorder_group=a.disorder_group,
+                    disorder_assembly=a.disorder_assembly,
+                    is_original_asym=is_asym[i],
+                    u_cart=a.u_cart,
+                )
+            )
+        for li, (i, _) in enumerate(mol):
+            for nb, _ in adj[i]:
+                if nb in local and li < local[nb]:
+                    final_bonds.append((atom_base + li, atom_base + local[nb]))
+        atom_base += len(mol)
 
     return final_atoms, final_bonds
 
