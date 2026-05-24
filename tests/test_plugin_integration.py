@@ -585,7 +585,6 @@ def test_cif_viewer_widget_initialization(qtbot):
     assert widget.structure is None
     assert widget.repeat_a.value() == 1
     assert widget.show_bonds.isChecked() is True
-    assert widget.determine_bond_order.isChecked() is False
     assert widget._get_current_view_mode() == "Whole Molecule"
     assert widget.show_cell.isEnabled() is False
     assert widget.show_axes.isEnabled() is False
@@ -671,7 +670,6 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
 
     # Modify UI values away from defaults
     widget.show_bonds.setChecked(False)
-    widget.determine_bond_order.setChecked(True)
     widget.show_hydrogens.setChecked(False)
     widget.keep_connected.setChecked(False)
     widget.show_cell.setChecked(False)
@@ -690,7 +688,6 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
 
     # Verify values are restored to defaults
     assert widget.show_bonds.isChecked() is True
-    assert widget.determine_bond_order.isChecked() is False
     assert widget.show_hydrogens.isChecked() is True
     assert widget.keep_connected.isChecked() is True
     assert widget.show_cell.isChecked() is True
@@ -715,8 +712,6 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     with open(settings_file, "r") as f:
         data = json.load(f)
     assert data["show_bonds"] is True
-    assert data["determine_bond_order"] is False
-    assert data["bond_tolerance"] == 0.45
     assert data["show_hydrogens"] is True
     assert data["fix_h_size"] is True
     assert data["probability"] == 50.0
@@ -1767,42 +1762,14 @@ def test_cif_viewer_widget_camera_reset_flag_on_toggles(qtbot):
     assert widget._reset_camera_on_next_render is True
 
 
-def test_cif_viewer_settings_load_save_and_auto_disable(qtbot, tmp_path, monkeypatch):
+def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeypatch):
     from cif_viewer.viewer import CifViewerWidget
-    import json
     import numpy as np
 
     context = StubContext()
     widget = CifViewerWidget(context=context)
     qtbot.addWidget(widget)
 
-    settings_file = tmp_path / "settings.json"
-    monkeypatch.setattr(widget, "_settings_path", lambda: str(settings_file))
-
-    # Test saving settings
-    widget.determine_bond_order.setChecked(True)
-    widget.bond_tolerance.setValue(0.75)
-    widget.save_settings()
-
-    assert settings_file.exists()
-    with open(settings_file, "r") as f:
-        data = json.load(f)
-    assert data["determine_bond_order"] is True
-    assert data["bond_tolerance"] == 0.75
-
-    # Reset widget UI and test loading settings
-    widget.determine_bond_order.blockSignals(True)
-    widget.bond_tolerance.blockSignals(True)
-    widget.determine_bond_order.setChecked(False)
-    widget.bond_tolerance.setValue(0.15)
-    widget.determine_bond_order.blockSignals(False)
-    widget.bond_tolerance.blockSignals(False)
-    widget.load_settings()
-
-    assert widget.determine_bond_order.isChecked() is True
-    assert widget.bond_tolerance.value() == 0.75
-
-    # Test auto-disable logic for >300 atoms
     # Mock plotter so _render_now doesn't return early
     class FakePlotter:
         def clear(self):
@@ -1816,16 +1783,20 @@ def test_cif_viewer_settings_load_save_and_auto_disable(qtbot, tmp_path, monkeyp
 
     context.plotter = FakePlotter()
 
-    # Mock render_atoms_to_rdkit_mol to avoid RDKit calls
+    # Track arguments passed to render_atoms_to_rdkit_mol
+    captured_kwargs = {}
     from rdkit import Chem
+
+    def mock_render_atoms_to_rdkit_mol(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return Chem.Mol()
 
     monkeypatch.setattr(
         "cif_viewer.viewer.render_atoms_to_rdkit_mol",
-        lambda *args, **kwargs: Chem.Mol(),
+        mock_render_atoms_to_rdkit_mol,
     )
     monkeypatch.setattr(widget, "_draw_with_moleditpy", lambda *args, **kwargs: None)
 
-    # Setup dummy structure and mock parser output to return 301 atoms
     class DummyAtom:
         def __init__(self):
             self.element = "C"
@@ -1841,22 +1812,29 @@ def test_cif_viewer_settings_load_save_and_auto_disable(qtbot, tmp_path, monkeyp
         asymmetric_atoms: list
         lattice: np.ndarray = dataclasses.field(default_factory=lambda: np.eye(3))
 
+    widget.radio_mol.setChecked(True)
+
+    # Case 1: <= 300 atoms (e.g. 100 atoms) -> determine_bond_order should be True
+    monkeypatch.setattr(
+        "cif_viewer.parser.grow_molecules",
+        lambda *args, **kwargs: ([DummyAtom() for _ in range(100)], []),
+    )
+    widget.structure = DummyStructure(
+        atoms=[DummyAtom() for _ in range(100)],
+        asymmetric_atoms=[DummyAtom() for _ in range(100)],
+    )
+    widget._render_now()
+    assert captured_kwargs.get("determine_bond_order") is True
+
+    # Case 2: > 300 atoms (e.g. 301 atoms) -> determine_bond_order should be False
+    captured_kwargs.clear()
     monkeypatch.setattr(
         "cif_viewer.parser.grow_molecules",
         lambda *args, **kwargs: ([DummyAtom() for _ in range(301)], []),
     )
-
     widget.structure = DummyStructure(
         atoms=[DummyAtom() for _ in range(301)],
         asymmetric_atoms=[DummyAtom() for _ in range(301)],
     )
-    widget.radio_mol.setChecked(True)
-    widget.determine_bond_order.setChecked(True)
-    widget.determine_bond_order.setEnabled(True)
-
-    # Trigger render (which calls _render_now)
     widget._render_now()
-
-    # The checkbox should be auto-disabled and set to False
-    assert widget.determine_bond_order.isChecked() is False
-    assert widget.determine_bond_order.isEnabled() is False
+    assert captured_kwargs.get("determine_bond_order") is False
