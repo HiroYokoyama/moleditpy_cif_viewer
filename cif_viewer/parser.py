@@ -10,6 +10,16 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+# pymatgen's SpaceGroup (a monty Singleton) emits a UserWarning when a CIF
+# uses a non-standard Hermann-Mauguin symbol (e.g. 'I1a1').  The warning is
+# cosmetic: pymatgen falls back to the short symbol and parsing continues.
+# Suppress it globally so it never reaches the user's console.
+warnings.filterwarnings(
+    "ignore",
+    message="Full symbol not available",
+    category=UserWarning,
+)
+
 
 _UNCERTAINTY_RE = re.compile(
     r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?)(?:\(\d+\))?$"

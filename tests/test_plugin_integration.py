@@ -1806,8 +1806,13 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
     class DummyAtom:
         def __init__(self):
             self.element = "C"
+            self.label = "C1"
             self.position = np.array([0.0, 0.0, 0.0])
+            self.fract = np.array([0.0, 0.0, 0.0])
+            self.cart = np.array([0.0, 0.0, 0.0])
+            self.occupancy = 1.0
             self.disorder_group = None
+            self.disorder_assembly = None
             self.disorder_key = None
 
     import dataclasses
