@@ -1028,6 +1028,21 @@ def grow_molecules(
     if not candidate_atoms:
         return [], []
 
+    adjacency = _infer_periodic_adjacency(structure)
+    is_polymer = any(
+        any(not np.allclose(shift, np.zeros(3, dtype=int)) for _, shift in neighs)
+        for neighs in adjacency.values()
+    )
+
+    if is_polymer:
+        logging.info(
+            "Polymer structure detected (periodic bond via adjacency). "
+            "Displaying 1x1x1 unit cell for Whole Molecule mode."
+        )
+        return expand_supercell(
+            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
+        )
+
     # Build bonds between all candidates
     bonds = infer_bonds(candidate_atoms, tolerance=tolerance)
 
@@ -1078,19 +1093,55 @@ def grow_molecules(
                             queue.append(neighbor)
                 components.append(comp)
 
-    is_polymer = False
-    for comp in components:
-        base_indices = {}
-        for idx in comp:
-            atom = candidate_atoms[idx]
-            if atom.base_index in base_indices:
-                if base_indices[atom.base_index] != atom.image:
-                    is_polymer = True
-                    break
-            else:
-                base_indices[atom.base_index] = atom.image
-        if is_polymer:
-            break
+    # Build bonds between all candidates
+    bonds = infer_bonds(candidate_atoms, tolerance=tolerance)
+
+    # Run BFS/DFS to identify components
+    num_atoms = len(candidate_atoms)
+    adj = {i: [] for i in range(num_atoms)}
+    for u, v in bonds:
+        adj[u].append(v)
+        adj[v].append(u)
+
+    components = None
+    try:
+        from rdkit import Chem
+
+        rw_mol = Chem.RWMol()
+        for _ in range(num_atoms):
+            rw_mol.AddAtom(Chem.Atom("C"))
+
+        seen_bonds = set()
+        for u, v in bonds:
+            key = tuple(sorted((int(u), int(v))))
+            if key not in seen_bonds:
+                seen_bonds.add(key)
+                rw_mol.AddBond(key[0], key[1], Chem.BondType.SINGLE)
+
+        mol_temp = rw_mol.GetMol()
+        components = Chem.GetMolFrags(mol_temp, asMols=False)
+    except Exception as exc:
+        logging.warning(
+            "RDKit component analysis failed, falling back to manual implementation: %s",
+            exc,
+        )
+
+    if components is None:
+        visited = [False] * num_atoms
+        components = []
+        for i in range(num_atoms):
+            if not visited[i]:
+                comp = []
+                queue = [i]
+                visited[i] = True
+                while queue:
+                    curr = queue.pop(0)
+                    comp.append(curr)
+                    for neighbor in adj[curr]:
+                        if not visited[neighbor]:
+                            visited[neighbor] = True
+                            queue.append(neighbor)
+                components.append(comp)
 
     if is_polymer:
         logging.info(
