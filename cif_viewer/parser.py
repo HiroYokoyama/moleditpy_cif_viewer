@@ -35,6 +35,7 @@ class CifAtom:
     occupancy: Optional[float] = None
     disorder_group: Optional[str] = None
     disorder_assembly: Optional[str] = None
+    u_cart: Optional[np.ndarray] = None
 
     @property
     def disorder_key(self) -> Optional[str]:
@@ -277,7 +278,10 @@ def _count_symops_from_loops(loops) -> int:
 
 
 def _parse_asymmetric_atoms(
-    block_data_lower, lattice: np.ndarray, label_to_disorder: dict
+    block_data_lower,
+    lattice: np.ndarray,
+    label_to_disorder: dict,
+    label_to_adp: Optional[dict] = None,
 ) -> List[CifAtom]:
     atoms = []
     if "_atom_site_label" in block_data_lower:
@@ -316,6 +320,27 @@ def _parse_asymmetric_atoms(
 
                 g, a = label_to_disorder.get(clean_lbl, (None, None))
 
+                u_cart_atom = None
+                if label_to_adp and clean_lbl in label_to_adp:
+                    try:
+                        u_orig_vals = list(label_to_adp[clean_lbl])
+                        u11, u22, u33, u23, u13, u12 = u_orig_vals
+                        U_frac_orig = np.array(
+                            [[u11, u12, u13], [u12, u22, u23], [u13, u23, u33]],
+                            dtype=float,
+                        )
+                        A = lattice.T
+                        A_inv = np.linalg.inv(A)
+                        N = np.diag([np.linalg.norm(x) for x in A_inv])
+                        mat_ustar = N @ U_frac_orig @ N
+                        u_cart_atom = A @ mat_ustar @ A.T
+                    except Exception as exc:
+                        logging.debug(
+                            "Failed to compute asymmetric atom U_cart for %s: %s",
+                            clean_lbl,
+                            exc,
+                        )
+
                 atoms.append(
                     CifAtom(
                         label=clean_lbl,
@@ -325,6 +350,7 @@ def _parse_asymmetric_atoms(
                         occupancy=occ,
                         disorder_group=g,
                         disorder_assembly=a,
+                        u_cart=u_cart_atom,
                     )
                 )
             except Exception as exc:
@@ -672,7 +698,10 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 )
 
                 asym_atoms = _parse_asymmetric_atoms(
-                    block_data_lower, struct.lattice.matrix, label_to_disorder
+                    block_data_lower,
+                    struct.lattice.matrix,
+                    label_to_disorder,
+                    label_to_adp,
                 )
 
                 cif_struct = _structure_from_pymatgen(
@@ -731,6 +760,12 @@ def _structure_from_pymatgen(
         clean_lbl = str(label).strip().strip("'\"")
         g, a = label_to_disorder.get(clean_lbl, (None, None))
 
+        u_cart_atom = None
+        if u_cart is not None and i < len(u_cart):
+            u_cart_atom = u_cart[i]
+            if np.allclose(u_cart_atom, 0.0):
+                u_cart_atom = None
+
         atoms.append(
             CifAtom(
                 label=label,
@@ -740,6 +775,7 @@ def _structure_from_pymatgen(
                 occupancy=occupancy,
                 disorder_group=g,
                 disorder_assembly=a,
+                u_cart=u_cart_atom,
             )
         )
 
@@ -917,11 +953,7 @@ def expand_supercell(
                 offset = np.array([ia, ib, ic], dtype=float)
                 cart_offset = offset @ structure.lattice
                 for base_index, atom in enumerate(base_atoms):
-                    u_cart_atom = None
-                    if structure.u_cart is not None and base_index < len(
-                        structure.u_cart
-                    ):
-                        u_cart_atom = structure.u_cart[base_index]
+                    u_cart_atom = getattr(atom, "u_cart", None)
 
                     atoms.append(
                         RenderAtom(
@@ -1114,9 +1146,7 @@ def grow_molecules(
                     logging.debug("Symmetry operation test point check failed: %s", ex)
 
             # Get original U_cart for this base_index
-            u_cart_orig = None
-            if structure.u_cart is not None and base_index < len(structure.u_cart):
-                u_cart_orig = structure.u_cart[base_index]
+            u_cart_orig = getattr(atom, "u_cart", None)
 
             # Compute rotated U_cart using the symmetry operation rotation matrix
             u_cart_site = None
@@ -1267,6 +1297,7 @@ def unwrap_connected_atoms(structure: CifStructure) -> List[CifAtom]:
                 atom.occupancy,
                 disorder_group=atom.disorder_group,
                 disorder_assembly=atom.disorder_assembly,
+                u_cart=getattr(atom, "u_cart", None),
             )
         )
     return unwrapped

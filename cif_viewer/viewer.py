@@ -1313,9 +1313,16 @@ class CifViewerWidget(QWidget):
 
         import dataclasses
 
-        structure_to_render = dataclasses.replace(
-            self.structure, atoms=tuple(base_atoms), asymmetric_atoms=tuple(base_atoms)
-        )
+        is_asym_only = (
+            view_mode == "Asymmetric Unit" or view_mode == "Whole Molecule"
+        ) and self.structure.asymmetric_atoms is not None
+        replace_kwargs = {
+            "atoms": tuple(base_atoms),
+            "asymmetric_atoms": tuple(base_atoms),
+        }
+        if hasattr(self.structure, "is_asymmetric_unit_only"):
+            replace_kwargs["is_asymmetric_unit_only"] = is_asym_only
+        structure_to_render = dataclasses.replace(self.structure, **replace_kwargs)
 
         tol = 0.45
 
