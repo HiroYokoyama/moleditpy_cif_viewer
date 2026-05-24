@@ -174,6 +174,25 @@ def test_render_atoms_to_rdkit_mol():
     np.testing.assert_allclose(conf.GetAtomPosition(1), [1.0, 0.0, 0.0])
 
 
+def test_render_atoms_to_rdkit_mol_with_error():
+    from cif_viewer.rdkit_bridge import render_atoms_to_rdkit_mol
+    from cif_viewer.parser import RenderAtom
+
+    # A valence-violating molecule (Carbon with 5 single bonds)
+    atoms = [
+        RenderAtom("C1", "C", 0, (0, 0, 0), np.array([0.0, 0.0, 0.0])),
+        RenderAtom("C2", "C", 1, (0, 0, 0), np.array([1.0, 0.0, 0.0])),
+        RenderAtom("C3", "C", 2, (0, 0, 0), np.array([0.0, 1.0, 0.0])),
+        RenderAtom("C4", "C", 3, (0, 0, 0), np.array([0.0, -1.0, 0.0])),
+        RenderAtom("C5", "C", 4, (0, 0, 0), np.array([-1.0, 0.0, 0.0])),
+        RenderAtom("C6", "C", 5, (0, 0, 0), np.array([1.0, 1.0, 0.0])),
+    ]
+    bonds = [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5)]
+    mol = render_atoms_to_rdkit_mol(atoms, bonds, determine_bond_order=True)
+    assert mol.HasProp("_bond_order_error")
+    assert "could not find valid bond ordering" in mol.GetProp("_bond_order_error")
+
+
 def test_parse_cif_file(tmp_path):
     from cif_viewer.parser import parse_cif_file
 

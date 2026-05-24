@@ -209,6 +209,28 @@ class CifViewerWidget(QWidget):
         view_row.addWidget(self.radio_pack)
         struct_layout.addLayout(view_row)
 
+        self.determine_bond_order = QCheckBox("Determine bond order (RDKit)")
+        self.determine_bond_order.setChecked(False)
+        self.determine_bond_order.toggled.connect(self.render)
+        self.determine_bond_order.toggled.connect(self.save_settings)
+        struct_layout.addWidget(self.determine_bond_order)
+
+        max_atoms_row = QHBoxLayout()
+        max_atoms_label = QLabel("Max number of atoms:")
+        self.max_atoms_spin = QSpinBox()
+        self.max_atoms_spin.setRange(10, 5000)
+        self.max_atoms_spin.setSingleStep(50)
+        self.max_atoms_spin.setValue(300)
+        self.max_atoms_spin.setToolTip(
+            "Maximum number of atoms to allow for bond order determination."
+        )
+        self.max_atoms_spin.valueChanged.connect(self.render)
+        self.max_atoms_spin.valueChanged.connect(self.save_settings)
+        max_atoms_row.addWidget(max_atoms_label)
+        max_atoms_row.addWidget(self.max_atoms_spin)
+        max_atoms_row.addStretch(1)
+        struct_layout.addLayout(max_atoms_row)
+
         struct_layout.addStretch(1)
 
         self.summary_label = QLabel(
@@ -406,23 +428,6 @@ class CifViewerWidget(QWidget):
         self.show_bonds.toggled.connect(self.render)
         self.show_bonds.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.show_bonds)
-
-        self.determine_bond_order = QCheckBox("Determine bond order (RDKit)")
-        self.determine_bond_order.setChecked(False)
-        self.determine_bond_order.toggled.connect(self.render)
-        self.determine_bond_order.toggled.connect(self.save_settings)
-        supercell_layout.addRow(self.determine_bond_order)
-
-        self.max_atoms_spin = QSpinBox()
-        self.max_atoms_spin.setRange(10, 5000)
-        self.max_atoms_spin.setSingleStep(50)
-        self.max_atoms_spin.setValue(300)
-        self.max_atoms_spin.setToolTip(
-            "Maximum number of atoms to allow for bond order determination."
-        )
-        self.max_atoms_spin.valueChanged.connect(self.render)
-        self.max_atoms_spin.valueChanged.connect(self.save_settings)
-        supercell_layout.addRow("Max number of atoms:", self.max_atoms_spin)
 
         self.show_hydrogens = QCheckBox("Show hydrogen atoms")
         self.show_hydrogens.setChecked(True)
@@ -1298,14 +1303,7 @@ class CifViewerWidget(QWidget):
                 keep_connected=self.keep_connected.isChecked(),
                 tolerance=tol,
             )
-        if not self.show_hydrogens.isChecked():
-            atoms = [atom for atom in atoms if atom.element != "H"]
-            from .parser import infer_bonds
-
-            bonds = infer_bonds(atoms, tolerance=tol)
-
         mol_bonds = bonds if self.show_bonds.isChecked() else []
-        self.last_rendered_atoms = atoms
         try:
             max_atoms = self.max_atoms_spin.value()
             determine_bo = self.determine_bond_order.isChecked() and (
@@ -1316,6 +1314,19 @@ class CifViewerWidget(QWidget):
             )
             # Tag the molecule so custom styles and overlays know it's from CIF viewer
             mol.SetProp("_from_cif_viewer", "1")
+
+            if not self.show_hydrogens.isChecked():
+                from rdkit import Chem
+
+                try:
+                    mol = Chem.RemoveHs(mol)
+                except Exception as e:
+                    logging.debug("RemoveHs failed: %s", e)
+                self.last_rendered_atoms = [
+                    atom for atom in atoms if atom.element != "H"
+                ]
+            else:
+                self.last_rendered_atoms = atoms
         except Exception as exc:
             QMessageBox.critical(
                 self, "CIF Viewer", f"Could not build RDKit view:\n{exc}"
@@ -1361,10 +1372,14 @@ class CifViewerWidget(QWidget):
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
         max_atoms = self.max_atoms_spin.value()
-        if self.determine_bond_order.isChecked() and len(atoms) > max_atoms:
-            summary_text += (
-                f" (Bond order determination skipped: over {max_atoms} atoms limit)"
-            )
+        if self.determine_bond_order.isChecked():
+            if len(atoms) > max_atoms:
+                summary_text += (
+                    f" (Bond order determination skipped: over {max_atoms} atoms limit)"
+                )
+            elif mol.HasProp("_bond_order_error") and mol.GetProp("_bond_order_error"):
+                err = mol.GetProp("_bond_order_error")
+                summary_text += f" (Bond order determination failed: {err})"
         self.summary_label.setText(summary_text)
         if self.context and hasattr(self.context, "show_status_message"):
             self.context.show_status_message(

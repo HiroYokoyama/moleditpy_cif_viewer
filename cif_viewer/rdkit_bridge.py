@@ -34,9 +34,13 @@ def render_atoms_to_rdkit_mol(
 
             # Determine bond orders in place (charge=0 by default)
             rdDetermineBonds.DetermineBondOrders(mol, charge=0)
+            mol.SetProp("_bond_order_error", "")
         except Exception as exc:
             import logging
 
-            logging.debug("RDKit DetermineBondOrders failed: %s", exc)
+            logging.warning("RDKit DetermineBondOrders failed: %s", exc)
+            mol.SetProp("_bond_order_error", str(exc))
+    else:
+        mol.SetProp("_bond_order_error", "")
 
     return mol
