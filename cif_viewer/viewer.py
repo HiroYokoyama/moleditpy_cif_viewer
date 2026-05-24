@@ -215,6 +215,13 @@ class CifViewerWidget(QWidget):
         self.determine_bond_order.toggled.connect(self.save_settings)
         struct_layout.addWidget(self.determine_bond_order)
 
+        self.bond_order_disabled_label = QLabel(
+            "  ⚠ Disabled: not available when \"All Parts\" is selected."
+        )
+        self.bond_order_disabled_label.setStyleSheet("color: gray; font-style: italic;")
+        self.bond_order_disabled_label.setVisible(False)
+        struct_layout.addWidget(self.bond_order_disabled_label)
+
         max_atoms_row = QHBoxLayout()
         max_atoms_label = QLabel("Max number of atoms:")
         self.max_atoms_spin = QSpinBox()
@@ -632,7 +639,21 @@ class CifViewerWidget(QWidget):
         self.render()
 
     def _on_disorder_changed(self):
+        """Handle changes in disorder selection.
+
+        Disables bond order determination when "All Parts" (None) is selected,
+        because RDKit cannot process overlapping disordered atoms.
+        """
         self._reset_camera_on_next_render = True
+        # Determine if "All Parts" is selected (currentData returns None)
+        data = self.disorder_combo.currentData()
+        if data is None:
+            # Gray out bond order option; preserve the checked state
+            self.determine_bond_order.setEnabled(False)
+            self.bond_order_disabled_label.setVisible(True)
+        else:
+            self.determine_bond_order.setEnabled(True)
+            self.bond_order_disabled_label.setVisible(False)
         self.render()
 
     def _on_tab_changed(self, index):
@@ -869,9 +890,17 @@ class CifViewerWidget(QWidget):
 
             self.disorder_label.setVisible(True)
             self.disorder_combo.setVisible(True)
+
+            # Combo defaults to index 0 = "All Parts"; gray out bond order
+            # (signals are blocked above so _on_disorder_changed won't fire)
+            self.determine_bond_order.setEnabled(False)
+            self.bond_order_disabled_label.setVisible(True)
         else:
             self.disorder_label.setVisible(False)
             self.disorder_combo.setVisible(False)
+            # No disorder - bond order determination is allowed
+            self.determine_bond_order.setEnabled(True)
+            self.bond_order_disabled_label.setVisible(False)
 
     def _update_info_ui(self):
         if self.structure is None:
