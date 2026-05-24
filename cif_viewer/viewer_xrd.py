@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QMessageBox,
 )
-from PyQt6.QtCore import Qt
 import logging
 
 import numpy as np

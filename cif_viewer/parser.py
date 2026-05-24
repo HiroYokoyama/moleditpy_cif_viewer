@@ -861,6 +861,7 @@ def expand_supercell(
     structure: CifStructure,
     repeats: Sequence[int],
     keep_connected: bool = True,
+    tolerance: float = 0.45,
 ) -> Tuple[List[RenderAtom], List[Tuple[int, int]]]:
     repeat_a, repeat_b, repeat_c = [max(1, int(value)) for value in repeats]
     atoms: List[RenderAtom] = []
@@ -886,7 +887,7 @@ def expand_supercell(
                         )
                     )
 
-    return atoms, infer_bonds(atoms)
+    return atoms, infer_bonds(atoms, tolerance=tolerance)
 
 
 def get_space_group_operations(structure: CifStructure) -> list:
@@ -924,6 +925,7 @@ def get_space_group_operations(structure: CifStructure) -> list:
 def grow_molecules(
     structure: CifStructure,
     selected_disorder_key: Optional[str] = None,
+    tolerance: float = 0.45,
 ) -> Tuple[List[RenderAtom], List[Tuple[int, int]]]:
     """
     Grow molecules to completion by applying symmetry operations and translations.
@@ -1000,7 +1002,7 @@ def grow_molecules(
         return [], []
 
     # Build bonds between all candidates
-    bonds = infer_bonds(candidate_atoms)
+    bonds = infer_bonds(candidate_atoms, tolerance=tolerance)
 
     # Run BFS/DFS to identify components
     num_atoms = len(candidate_atoms)
@@ -1009,21 +1011,67 @@ def grow_molecules(
         adj[u].append(v)
         adj[v].append(u)
 
-    visited = [False] * num_atoms
-    components = []
-    for i in range(num_atoms):
-        if not visited[i]:
-            comp = []
-            queue = [i]
-            visited[i] = True
-            while queue:
-                curr = queue.pop(0)
-                comp.append(curr)
-                for neighbor in adj[curr]:
-                    if not visited[neighbor]:
-                        visited[neighbor] = True
-                        queue.append(neighbor)
-            components.append(comp)
+    components = None
+    try:
+        from rdkit import Chem
+
+        rw_mol = Chem.RWMol()
+        for _ in range(num_atoms):
+            rw_mol.AddAtom(Chem.Atom("C"))
+
+        seen_bonds = set()
+        for u, v in bonds:
+            key = tuple(sorted((int(u), int(v))))
+            if key not in seen_bonds:
+                seen_bonds.add(key)
+                rw_mol.AddBond(key[0], key[1], Chem.BondType.SINGLE)
+
+        mol_temp = rw_mol.GetMol()
+        components = Chem.GetMolFrags(mol_temp, asMols=False)
+    except Exception as exc:
+        logging.warning(
+            "RDKit component analysis failed, falling back to manual implementation: %s",
+            exc,
+        )
+
+    if components is None:
+        visited = [False] * num_atoms
+        components = []
+        for i in range(num_atoms):
+            if not visited[i]:
+                comp = []
+                queue = [i]
+                visited[i] = True
+                while queue:
+                    curr = queue.pop(0)
+                    comp.append(curr)
+                    for neighbor in adj[curr]:
+                        if not visited[neighbor]:
+                            visited[neighbor] = True
+                            queue.append(neighbor)
+                components.append(comp)
+
+    is_polymer = False
+    for comp in components:
+        base_indices = {}
+        for idx in comp:
+            atom = candidate_atoms[idx]
+            if atom.base_index in base_indices:
+                if base_indices[atom.base_index] != atom.image:
+                    is_polymer = True
+                    break
+            else:
+                base_indices[atom.base_index] = atom.image
+        if is_polymer:
+            break
+
+    if is_polymer:
+        logging.info(
+            "Polymer structure detected. Displaying 1x1x1 unit cell for Whole Molecule mode."
+        )
+        return expand_supercell(
+            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
+        )
 
     # Keep components which contain at least one original asymmetric unit atom (is_original_asym == True)
     kept_indices = []
@@ -1178,12 +1226,60 @@ def celleditpy_cell_axis_segments(lattice: np.ndarray):
     return axis_lines + edges
 
 
-def infer_bonds(atoms: Sequence[RenderAtom]) -> List[Tuple[int, int]]:
+def infer_bonds(
+    atoms: Sequence[RenderAtom], tolerance: float = 0.45
+) -> List[Tuple[int, int]]:
     if not atoms:
         return []
 
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import rdDetermineBonds
+        from rdkit.Geometry import Point3D
+
+        rw_mol = Chem.RWMol()
+        for atom in atoms:
+            rw_mol.AddAtom(Chem.Atom(atom.element))
+
+        conformer = Chem.Conformer(len(atoms))
+        for idx, atom in enumerate(atoms):
+            x, y, z = [float(val) for val in atom.position]
+            conformer.SetAtomPosition(idx, Point3D(x, y, z))
+        rw_mol.AddConformer(conformer, assignId=True)
+
+        cov_factor = 1.0 + (tolerance / 1.5)
+        rdDetermineBonds.DetermineConnectivity(
+            rw_mol, covFactor=cov_factor, useVdw=True
+        )
+
+        rdkit_bonds = []
+        for bond in rw_mol.GetBonds():
+            u = bond.GetBeginAtomIdx()
+            v = bond.GetEndAtomIdx()
+            u, v = sorted((u, v))
+
+            left_atom = atoms[u]
+            right_atom = atoms[v]
+            if (
+                left_atom.disorder_key is not None
+                and right_atom.disorder_key is not None
+            ):
+                if left_atom.disorder_key != right_atom.disorder_key:
+                    continue
+
+            rdkit_bonds.append((u, v))
+
+        # Sort the bonds to ensure deterministic order matching manual implementation
+        rdkit_bonds.sort()
+        return rdkit_bonds
+    except Exception as exc:
+        logging.debug(
+            "RDKit DetermineConnectivity failed, falling back to manual bond detection: %s",
+            exc,
+        )
+
     bonds: List[Tuple[int, int]] = []
-    max_cutoff = 2.45
+    max_cutoff = max(2.45, 2.0 + tolerance)
 
     positions = np.array([atom.position for atom in atoms])
     min_coords = np.min(positions, axis=0) - 1.0
@@ -1222,7 +1318,7 @@ def infer_bonds(atoms: Sequence[RenderAtom]) -> List[Tuple[int, int]]:
                     if left_atom.disorder_key != right_atom.disorder_key:
                         continue
                 right_radius = covalent_radius(right_atom.element)
-                cutoff = min(max_cutoff, left_radius + right_radius + 0.45)
+                cutoff = min(max_cutoff, left_radius + right_radius + tolerance)
                 dist_sq = np.sum((positions[left] - positions[right]) ** 2)
                 if 0.25 * 0.25 <= dist_sq <= cutoff * cutoff:
                     bonds.append((left, right))
@@ -1247,7 +1343,7 @@ def infer_bonds(atoms: Sequence[RenderAtom]) -> List[Tuple[int, int]]:
                             if left_atom.disorder_key != right_atom.disorder_key:
                                 continue
                         right_radius = covalent_radius(right_atom.element)
-                        cutoff = min(max_cutoff, left_radius + right_radius + 0.45)
+                        cutoff = min(max_cutoff, left_radius + right_radius + tolerance)
                         dist_sq = np.sum((positions[left] - positions[right]) ** 2)
                         if 0.25 * 0.25 <= dist_sq <= cutoff * cutoff:
                             bonds.append((left, right))

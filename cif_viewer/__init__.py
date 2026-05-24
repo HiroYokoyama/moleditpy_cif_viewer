@@ -1,7 +1,7 @@
 import logging
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "0.6.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -40,6 +40,15 @@ def initialize(context):
                     getattr(w, "structure", None) is not None
                     and dock_widget.isVisible()
                 ):
+                    if getattr(w, "_reset_camera_on_next_render", False):
+                        try:
+                            self_vm.plotter.reset_camera()
+                            w._reset_camera_on_next_render = False
+                        except Exception as e:
+                            logging.debug(
+                                "Failed to reset camera in hooked_draw: %s", e
+                            )
+
                     try:
                         from PyQt6.QtCore import QTimer
 
@@ -178,6 +187,15 @@ def initialize(context):
                 mw.view_3d_manager.set_3d_style("ball_and_stick")
             return
 
+        should_restore_camera = True
+        if widget is not None:
+            should_restore_camera = not getattr(
+                widget, "_reset_camera_on_next_render", False
+            )
+
+        camera_state = (
+            getattr(plotter, "camera_position", None) if should_restore_camera else None
+        )
         plotter.clear()
 
         if hasattr(mw, "init_manager") and hasattr(mw.init_manager, "settings"):
@@ -507,6 +525,22 @@ def initialize(context):
                     plotter.render()
             else:
                 plotter.render()
+
+        if camera_state is not None:
+            try:
+                plotter.camera_position = camera_state
+            except Exception as e:
+                logging.debug(
+                    "Failed to restore camera position in draw_ellipsoid_model: %s",
+                    e,
+                )
+        else:
+            try:
+                plotter.reset_camera()
+                if widget is not None:
+                    widget._reset_camera_on_next_render = False
+            except Exception as e:
+                logging.debug("Failed to reset camera in draw_ellipsoid_model: %s", e)
 
         try:
             from PyQt6.QtCore import QTimer

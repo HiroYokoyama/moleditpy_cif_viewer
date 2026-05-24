@@ -1,6 +1,5 @@
 import os
 import tempfile
-import numpy as np
 
 from cif_viewer.parser import parse_cif_file_pymatgen
 

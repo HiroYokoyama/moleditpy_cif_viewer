@@ -40,7 +40,6 @@ def main():
     has_qt = False
     if not unit_only:
         try:
-            import PyQt6
             from PyQt6.QtWidgets import QApplication
 
             # Attempt to retrieve or create the QApplication instance

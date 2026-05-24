@@ -407,6 +407,21 @@ class CifViewerWidget(QWidget):
         self.show_bonds.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.show_bonds)
 
+        self.determine_bond_order = QCheckBox("Determine bond order (RDKit)")
+        self.determine_bond_order.setChecked(False)
+        self.determine_bond_order.toggled.connect(self.render)
+        self.determine_bond_order.toggled.connect(self.save_settings)
+        supercell_layout.addRow(self.determine_bond_order)
+
+        self.bond_tolerance = QDoubleSpinBox()
+        self.bond_tolerance.setRange(0.0, 2.0)
+        self.bond_tolerance.setSingleStep(0.05)
+        self.bond_tolerance.setValue(0.45)
+        self.bond_tolerance.setDecimals(2)
+        self.bond_tolerance.valueChanged.connect(self.render)
+        self.bond_tolerance.valueChanged.connect(self.save_settings)
+        supercell_layout.addRow("Bond tolerance (Å):", self.bond_tolerance)
+
         self.show_hydrogens = QCheckBox("Show hydrogen atoms")
         self.show_hydrogens.setChecked(True)
         self.show_hydrogens.toggled.connect(self.render)
@@ -606,9 +621,11 @@ class CifViewerWidget(QWidget):
         if hasattr(self, "show_axes"):
             self.show_axes.setEnabled(mode == "Packing")
         self.save_settings()
+        self._reset_camera_on_next_render = True
         self.render()
 
     def _on_disorder_changed(self):
+        self._reset_camera_on_next_render = True
         self.render()
 
     def _on_tab_changed(self, index):
@@ -728,6 +745,10 @@ class CifViewerWidget(QWidget):
         self.radio_asym.blockSignals(True)
         self.radio_mol.blockSignals(True)
         self.radio_pack.blockSignals(True)
+        if hasattr(self, "determine_bond_order"):
+            self.determine_bond_order.blockSignals(True)
+        if hasattr(self, "bond_tolerance"):
+            self.bond_tolerance.blockSignals(True)
 
         try:
             self.show_bonds.setChecked(True)
@@ -741,6 +762,10 @@ class CifViewerWidget(QWidget):
             self.h_scale_spin.setValue(20.0)
             self.axis_width.setValue(5)
             self.ellipsoid_ring_width.setValue(2)
+            if hasattr(self, "determine_bond_order"):
+                self.determine_bond_order.setChecked(False)
+            if hasattr(self, "bond_tolerance"):
+                self.bond_tolerance.setValue(0.45)
 
             idx = self.axis_font.findText("arial")
             if idx >= 0:
@@ -774,8 +799,13 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(False)
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
+            if hasattr(self, "determine_bond_order"):
+                self.determine_bond_order.blockSignals(False)
+            if hasattr(self, "bond_tolerance"):
+                self.bond_tolerance.blockSignals(False)
 
         self.save_settings()
+        self._reset_camera_on_next_render = True
         self.render()
 
     def _switch_to_ellipsoids(self):
@@ -988,11 +1018,19 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(True)
             self.radio_mol.blockSignals(True)
             self.radio_pack.blockSignals(True)
+            if hasattr(self, "determine_bond_order"):
+                self.determine_bond_order.blockSignals(True)
+            if hasattr(self, "bond_tolerance"):
+                self.bond_tolerance.blockSignals(True)
 
             self._set_current_view_mode("Whole Molecule")
 
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
+            if "determine_bond_order" in data and hasattr(self, "determine_bond_order"):
+                self.determine_bond_order.setChecked(bool(data["determine_bond_order"]))
+            if "bond_tolerance" in data and hasattr(self, "bond_tolerance"):
+                self.bond_tolerance.setValue(float(data["bond_tolerance"]))
             if "show_hydrogens" in data:
                 self.show_hydrogens.setChecked(bool(data["show_hydrogens"]))
             if "keep_connected" in data:
@@ -1065,6 +1103,10 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(False)
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
+            if hasattr(self, "determine_bond_order"):
+                self.determine_bond_order.blockSignals(False)
+            if hasattr(self, "bond_tolerance"):
+                self.bond_tolerance.blockSignals(False)
 
     def save_settings(self, *args):
         path = self._settings_path()
@@ -1072,6 +1114,12 @@ class CifViewerWidget(QWidget):
 
         data = {
             "show_bonds": self.show_bonds.isChecked(),
+            "determine_bond_order": self.determine_bond_order.isChecked()
+            if hasattr(self, "determine_bond_order")
+            else False,
+            "bond_tolerance": self.bond_tolerance.value()
+            if hasattr(self, "bond_tolerance")
+            else 0.45,
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
             "show_cell": self.show_cell.isChecked(),
@@ -1247,28 +1295,48 @@ class CifViewerWidget(QWidget):
             self.structure, atoms=tuple(base_atoms), asymmetric_atoms=tuple(base_atoms)
         )
 
+        tol = self.bond_tolerance.value() if hasattr(self, "bond_tolerance") else 0.45
+
         if view_mode == "Whole Molecule":
             from .parser import grow_molecules
 
             atoms, bonds = grow_molecules(
-                structure_to_render, selected_disorder_key=selected_key
+                structure_to_render, selected_disorder_key=selected_key, tolerance=tol
             )
         else:
             atoms, bonds = expand_supercell(
                 structure_to_render,
                 repeats,
                 keep_connected=self.keep_connected.isChecked(),
+                tolerance=tol,
             )
         if not self.show_hydrogens.isChecked():
             atoms = [atom for atom in atoms if atom.element != "H"]
             from .parser import infer_bonds
 
-            bonds = infer_bonds(atoms)
+            bonds = infer_bonds(atoms, tolerance=tol)
+
+        # Auto-disable determine_bond_order if atom count is more than 300
+        if len(atoms) > 300:
+            if hasattr(self, "determine_bond_order"):
+                if self.determine_bond_order.isChecked():
+                    self.determine_bond_order.blockSignals(True)
+                    self.determine_bond_order.setChecked(False)
+                    self.determine_bond_order.blockSignals(False)
+                self.determine_bond_order.setEnabled(False)
+        else:
+            if hasattr(self, "determine_bond_order"):
+                self.determine_bond_order.setEnabled(True)
 
         mol_bonds = bonds if self.show_bonds.isChecked() else []
         self.last_rendered_atoms = atoms
         try:
-            mol = render_atoms_to_rdkit_mol(atoms, mol_bonds)
+            determine_bo = False
+            if hasattr(self, "determine_bond_order"):
+                determine_bo = self.determine_bond_order.isChecked()
+            mol = render_atoms_to_rdkit_mol(
+                atoms, mol_bonds, determine_bond_order=determine_bo
+            )
             # Tag the molecule so custom styles and overlays know it's from CIF viewer
             mol.SetProp("_from_cif_viewer", "1")
         except Exception as exc:

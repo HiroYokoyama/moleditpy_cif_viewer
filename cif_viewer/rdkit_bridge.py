@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Sequence, Tuple
 
 
-def render_atoms_to_rdkit_mol(render_atoms, bonds: Sequence[Tuple[int, int]]):
+def render_atoms_to_rdkit_mol(
+    render_atoms, bonds: Sequence[Tuple[int, int]], determine_bond_order: bool = False
+):
     from rdkit import Chem
     from rdkit.Geometry import Point3D
 
@@ -25,4 +27,16 @@ def render_atoms_to_rdkit_mol(render_atoms, bonds: Sequence[Tuple[int, int]]):
         x, y, z = [float(value) for value in atom.position]
         conformer.SetAtomPosition(index, Point3D(x, y, z))
     mol.AddConformer(conformer, assignId=True)
+
+    if determine_bond_order:
+        try:
+            from rdkit.Chem import rdDetermineBonds
+
+            # Determine bond orders in place (charge=0 by default)
+            rdDetermineBonds.DetermineBondOrders(mol, charge=0)
+        except Exception as exc:
+            import logging
+
+            logging.debug("RDKit DetermineBondOrders failed: %s", exc)
+
     return mol

@@ -627,3 +627,66 @@ C1 C 0.1 0.1 0.1
     assert len(atoms) == 1
     assert atoms[0].label == "C1"
     assert np.allclose(atoms[0].position, np.array([1.0, 1.0, 1.0]))
+
+
+def test_grow_molecules_polymer():
+    from cif_viewer.parser import grow_molecules, parse_cif
+
+    # A 1D polymer chain along x-axis
+    cif = """
+data_polymer
+_cell_length_a 2.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.2 0.5 0.5
+C2 C 0.8 0.5 0.5
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+
+    # Since it is a polymer, it should fallback to 1x1x1, which has only 2 atoms in the unit cell.
+    assert len(atoms) == 2
+
+
+def test_infer_bonds_fallback(monkeypatch):
+    from cif_viewer.parser import infer_bonds, RenderAtom
+    import numpy as np
+
+    def mock_determine_connectivity(*args, **kwargs):
+        raise RuntimeError("Simulated RDKit error")
+
+    try:
+        import rdkit.Chem.rdDetermineBonds as rdb
+
+        monkeypatch.setattr(rdb, "DetermineConnectivity", mock_determine_connectivity)
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+    atoms = [
+        RenderAtom(
+            label="C1",
+            element="C",
+            base_index=0,
+            image=(0, 0, 0),
+            position=np.array([0.0, 0.0, 0.0]),
+        ),
+        RenderAtom(
+            label="C2",
+            element="C",
+            base_index=1,
+            image=(0, 0, 0),
+            position=np.array([1.5, 0.0, 0.0]),
+        ),
+    ]
+    bonds = infer_bonds(atoms)
+    assert len(bonds) == 1

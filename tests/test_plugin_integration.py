@@ -585,6 +585,7 @@ def test_cif_viewer_widget_initialization(qtbot):
     assert widget.structure is None
     assert widget.repeat_a.value() == 1
     assert widget.show_bonds.isChecked() is True
+    assert widget.determine_bond_order.isChecked() is False
     assert widget._get_current_view_mode() == "Whole Molecule"
     assert widget.show_cell.isEnabled() is False
     assert widget.show_axes.isEnabled() is False
@@ -670,6 +671,7 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
 
     # Modify UI values away from defaults
     widget.show_bonds.setChecked(False)
+    widget.determine_bond_order.setChecked(True)
     widget.show_hydrogens.setChecked(False)
     widget.keep_connected.setChecked(False)
     widget.show_cell.setChecked(False)
@@ -688,6 +690,7 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
 
     # Verify values are restored to defaults
     assert widget.show_bonds.isChecked() is True
+    assert widget.determine_bond_order.isChecked() is False
     assert widget.show_hydrogens.isChecked() is True
     assert widget.keep_connected.isChecked() is True
     assert widget.show_cell.isChecked() is True
@@ -712,6 +715,8 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     with open(settings_file, "r") as f:
         data = json.load(f)
     assert data["show_bonds"] is True
+    assert data["determine_bond_order"] is False
+    assert data["bond_tolerance"] == 0.45
     assert data["show_hydrogens"] is True
     assert data["fix_h_size"] is True
     assert data["probability"] == 50.0
@@ -1579,8 +1584,7 @@ C1 C 0.1 0.1 0.1
 def test_powder_pattern_dialog_export_csv(qtbot, tmp_path, monkeypatch):
     from cif_viewer.viewer_xrd import PowderPatternDialog
     from cif_viewer.parser import parse_cif
-    from PyQt6.QtWidgets import QMessageBox, QFileDialog
-    import os
+    from PyQt6.QtWidgets import QMessageBox
 
     cif_content = """data_xrd
 _cell_length_a 5.0
@@ -1727,3 +1731,132 @@ C2 C 0.2 0.2 0.2
 
     # This shouldn't raise any exception, and should just return
     dialog._export_csv()
+
+
+def test_cif_viewer_widget_camera_reset_flag_on_toggles(qtbot):
+    from cif_viewer.viewer import CifViewerWidget
+
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+
+    # Initially, _reset_camera_on_next_render is True (from __init__)
+    assert widget._reset_camera_on_next_render is True
+
+    # Clear it
+    widget._reset_camera_on_next_render = False
+
+    # 1. Toggle view mode
+    widget.radio_pack.setChecked(True)
+    assert widget._reset_camera_on_next_render is True
+
+    widget._reset_camera_on_next_render = False
+    widget.radio_mol.setChecked(True)
+    assert widget._reset_camera_on_next_render is True
+
+    widget._reset_camera_on_next_render = False
+
+    # 2. Toggle disorder
+    widget._on_disorder_changed()
+    assert widget._reset_camera_on_next_render is True
+
+    widget._reset_camera_on_next_render = False
+
+    # 3. Reset defaults
+    widget.reset_to_defaults()
+    assert widget._reset_camera_on_next_render is True
+
+
+def test_cif_viewer_settings_load_save_and_auto_disable(qtbot, tmp_path, monkeypatch):
+    from cif_viewer.viewer import CifViewerWidget
+    import json
+    import numpy as np
+
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(widget, "_settings_path", lambda: str(settings_file))
+
+    # Test saving settings
+    widget.determine_bond_order.setChecked(True)
+    widget.bond_tolerance.setValue(0.75)
+    widget.save_settings()
+
+    assert settings_file.exists()
+    with open(settings_file, "r") as f:
+        data = json.load(f)
+    assert data["determine_bond_order"] is True
+    assert data["bond_tolerance"] == 0.75
+
+    # Reset widget UI and test loading settings
+    widget.determine_bond_order.blockSignals(True)
+    widget.bond_tolerance.blockSignals(True)
+    widget.determine_bond_order.setChecked(False)
+    widget.bond_tolerance.setValue(0.15)
+    widget.determine_bond_order.blockSignals(False)
+    widget.bond_tolerance.blockSignals(False)
+    widget.load_settings()
+
+    assert widget.determine_bond_order.isChecked() is True
+    assert widget.bond_tolerance.value() == 0.75
+
+    # Test auto-disable logic for >300 atoms
+    # Mock plotter so _render_now doesn't return early
+    class FakePlotter:
+        def clear(self):
+            pass
+
+        def render(self):
+            pass
+
+        def reset_camera(self):
+            pass
+
+    context.plotter = FakePlotter()
+
+    # Mock render_atoms_to_rdkit_mol to avoid RDKit calls
+    from rdkit import Chem
+
+    monkeypatch.setattr(
+        "cif_viewer.viewer.render_atoms_to_rdkit_mol",
+        lambda *args, **kwargs: Chem.Mol(),
+    )
+    monkeypatch.setattr(widget, "_draw_with_moleditpy", lambda *args, **kwargs: None)
+
+    # Setup dummy structure and mock parser output to return 301 atoms
+    class DummyAtom:
+        def __init__(self):
+            self.element = "C"
+            self.position = np.array([0.0, 0.0, 0.0])
+            self.disorder_group = None
+            self.disorder_key = None
+
+    import dataclasses
+
+    @dataclasses.dataclass
+    class DummyStructure:
+        atoms: list
+        asymmetric_atoms: list
+        lattice: np.ndarray = dataclasses.field(default_factory=lambda: np.eye(3))
+
+    monkeypatch.setattr(
+        "cif_viewer.parser.grow_molecules",
+        lambda *args, **kwargs: ([DummyAtom() for _ in range(301)], []),
+    )
+
+    widget.structure = DummyStructure(
+        atoms=[DummyAtom() for _ in range(301)],
+        asymmetric_atoms=[DummyAtom() for _ in range(301)],
+    )
+    widget.radio_mol.setChecked(True)
+    widget.determine_bond_order.setChecked(True)
+    widget.determine_bond_order.setEnabled(True)
+
+    # Trigger render (which calls _render_now)
+    widget._render_now()
+
+    # The checkbox should be auto-disabled and set to False
+    assert widget.determine_bond_order.isChecked() is False
+    assert widget.determine_bond_order.isEnabled() is False
