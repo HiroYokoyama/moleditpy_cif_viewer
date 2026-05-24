@@ -1864,3 +1864,54 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
     assert widget.determine_bond_order.isChecked() is True
     assert widget.determine_bond_order.isEnabled() is True
     assert "skipped: over 200 atoms limit" in widget.summary_label.text()
+
+
+def test_cif_viewer_widget_is_asymmetric_unit_only_passed_to_grow_molecules(
+    qtbot, monkeypatch
+):
+    from cif_viewer.viewer import CifViewerWidget
+    from cif_viewer.parser import CifStructure, CifAtom
+    import numpy as np
+    from tests.test_plugin_integration import StubContext
+
+    # Setup a stub context
+    context = StubContext()
+    dock = None
+    widget = CifViewerWidget(dock, context)
+    qtbot.addWidget(widget)
+
+    # Create a dummy structure
+    atom = CifAtom(
+        label="C1",
+        element="C",
+        fract=np.array([0.0, 0.0, 0.0]),
+        cart=np.array([0.0, 0.0, 0.0]),
+    )
+    struct = CifStructure(
+        name="Dummy",
+        lattice=np.eye(3),
+        atoms=(atom,),
+        asymmetric_atoms=(atom,),
+        cell_lengths=(10.0, 10.0, 10.0),
+        cell_angles=(90.0, 90.0, 90.0),
+    )
+    widget.structure = struct
+
+    # Mock grow_molecules to capture the passed structure
+    captured_struct = []
+
+    def mock_grow_molecules(structure, *args, **kwargs):
+        captured_struct.append(structure)
+        return ([atom], [])
+
+    monkeypatch.setattr("cif_viewer.viewer.grow_molecules", mock_grow_molecules)
+
+    # Trigger render with Whole Molecule view mode
+    widget.view_mode_combo.setCurrentText("Whole Molecule")
+    widget._render_now()
+
+    # Assert grow_molecules was called
+    assert len(captured_struct) > 0
+    # Assert that is_asymmetric_unit_only flag was set to True
+    assert hasattr(captured_struct[0], "is_asymmetric_unit_only")
+    assert captured_struct[0].is_asymmetric_unit_only is True
