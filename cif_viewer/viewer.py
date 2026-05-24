@@ -413,6 +413,17 @@ class CifViewerWidget(QWidget):
         self.determine_bond_order.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.determine_bond_order)
 
+        self.max_atoms_spin = QSpinBox()
+        self.max_atoms_spin.setRange(10, 5000)
+        self.max_atoms_spin.setSingleStep(50)
+        self.max_atoms_spin.setValue(300)
+        self.max_atoms_spin.setToolTip(
+            "Maximum number of atoms to allow for bond order determination."
+        )
+        self.max_atoms_spin.valueChanged.connect(self.render)
+        self.max_atoms_spin.valueChanged.connect(self.save_settings)
+        supercell_layout.addRow("Max number of atoms:", self.max_atoms_spin)
+
         self.show_hydrogens = QCheckBox("Show hydrogen atoms")
         self.show_hydrogens.setChecked(True)
         self.show_hydrogens.toggled.connect(self.render)
@@ -737,6 +748,7 @@ class CifViewerWidget(QWidget):
         self.radio_mol.blockSignals(True)
         self.radio_pack.blockSignals(True)
         self.determine_bond_order.blockSignals(True)
+        self.max_atoms_spin.blockSignals(True)
 
         try:
             self.show_bonds.setChecked(True)
@@ -751,6 +763,7 @@ class CifViewerWidget(QWidget):
             self.axis_width.setValue(5)
             self.ellipsoid_ring_width.setValue(2)
             self.determine_bond_order.setChecked(False)
+            self.max_atoms_spin.setValue(300)
 
             idx = self.axis_font.findText("arial")
             if idx >= 0:
@@ -785,6 +798,7 @@ class CifViewerWidget(QWidget):
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
             self.determine_bond_order.blockSignals(False)
+            self.max_atoms_spin.blockSignals(False)
 
         self.save_settings()
         self._reset_camera_on_next_render = True
@@ -1001,6 +1015,7 @@ class CifViewerWidget(QWidget):
             self.radio_mol.blockSignals(True)
             self.radio_pack.blockSignals(True)
             self.determine_bond_order.blockSignals(True)
+            self.max_atoms_spin.blockSignals(True)
 
             self._set_current_view_mode("Whole Molecule")
 
@@ -1008,6 +1023,8 @@ class CifViewerWidget(QWidget):
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
             if "determine_bond_order" in data:
                 self.determine_bond_order.setChecked(bool(data["determine_bond_order"]))
+            if "max_atoms_for_bond_order" in data:
+                self.max_atoms_spin.setValue(int(data["max_atoms_for_bond_order"]))
             if "show_hydrogens" in data:
                 self.show_hydrogens.setChecked(bool(data["show_hydrogens"]))
             if "keep_connected" in data:
@@ -1081,6 +1098,7 @@ class CifViewerWidget(QWidget):
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
             self.determine_bond_order.blockSignals(False)
+            self.max_atoms_spin.blockSignals(False)
 
     def save_settings(self, *args):
         path = self._settings_path()
@@ -1089,6 +1107,7 @@ class CifViewerWidget(QWidget):
         data = {
             "show_bonds": self.show_bonds.isChecked(),
             "determine_bond_order": self.determine_bond_order.isChecked(),
+            "max_atoms_for_bond_order": self.max_atoms_spin.value(),
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
             "show_cell": self.show_cell.isChecked(),
@@ -1288,7 +1307,10 @@ class CifViewerWidget(QWidget):
         mol_bonds = bonds if self.show_bonds.isChecked() else []
         self.last_rendered_atoms = atoms
         try:
-            determine_bo = self.determine_bond_order.isChecked() and (len(atoms) <= 300)
+            max_atoms = self.max_atoms_spin.value()
+            determine_bo = self.determine_bond_order.isChecked() and (
+                len(atoms) <= max_atoms
+            )
             mol = render_atoms_to_rdkit_mol(
                 atoms, mol_bonds, determine_bond_order=determine_bo
             )
@@ -1338,8 +1360,11 @@ class CifViewerWidget(QWidget):
             f"{len(atoms)} rendered atoms, {len(bonds)} inferred bonds, "
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
-        if self.determine_bond_order.isChecked() and len(atoms) > 300:
-            summary_text += " (Bond order determination skipped: over 300 atoms limit)"
+        max_atoms = self.max_atoms_spin.value()
+        if self.determine_bond_order.isChecked() and len(atoms) > max_atoms:
+            summary_text += (
+                f" (Bond order determination skipped: over {max_atoms} atoms limit)"
+            )
         self.summary_label.setText(summary_text)
         if self.context and hasattr(self.context, "show_status_message"):
             self.context.show_status_message(
