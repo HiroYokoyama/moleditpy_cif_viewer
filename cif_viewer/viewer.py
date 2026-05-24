@@ -292,30 +292,36 @@ class CifViewerWidget(QWidget):
         view_row.addWidget(self.radio_pack)
         struct_layout.addLayout(view_row)
 
+        style_group = QGroupBox("Display Style")
+        style_group_layout = QVBoxLayout()
+
         self.show_hydrogens = QCheckBox("Show hydrogen atoms")
         self.show_hydrogens.setChecked(True)
         self.show_hydrogens.toggled.connect(self.render)
         self.show_hydrogens.toggled.connect(self.save_settings)
-        struct_layout.addWidget(self.show_hydrogens)
+        style_group_layout.addWidget(self.show_hydrogens)
 
         self.show_bonds = QCheckBox("Show bonds")
         self.show_bonds.setChecked(True)
         self.show_bonds.toggled.connect(self.render)
         self.show_bonds.toggled.connect(self.save_settings)
-        struct_layout.addWidget(self.show_bonds)
+        style_group_layout.addWidget(self.show_bonds)
 
         self.determine_bond_order = QCheckBox("Determine bond order (RDKit)")
         self.determine_bond_order.setChecked(False)
         self.determine_bond_order.toggled.connect(self.render)
         self.determine_bond_order.toggled.connect(self.save_settings)
-        struct_layout.addWidget(self.determine_bond_order)
+        style_group_layout.addWidget(self.determine_bond_order)
 
         self.bond_order_disabled_label = QLabel(
             '  ⚠ Disabled: not available when "All Parts" is selected.'
         )
         self.bond_order_disabled_label.setStyleSheet("color: gray; font-style: italic;")
         self.bond_order_disabled_label.setVisible(False)
-        struct_layout.addWidget(self.bond_order_disabled_label)
+        style_group_layout.addWidget(self.bond_order_disabled_label)
+
+        style_group.setLayout(style_group_layout)
+        struct_layout.addWidget(style_group)
 
         max_atoms_row = QHBoxLayout()
         max_atoms_label = QLabel("Max number of atoms:")
