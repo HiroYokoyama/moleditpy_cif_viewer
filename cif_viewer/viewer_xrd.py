@@ -412,7 +412,9 @@ class PowderPatternDialog(QDialog):
         profile_btn = msg_box.addButton(
             "Simulated Profile (Curve)", QMessageBox.ButtonRole.ActionRole
         )
-        msg_box.addButton("Bragg Peaks (Sticks)", QMessageBox.ButtonRole.ActionRole)
+        sticks_btn = msg_box.addButton(
+            "Bragg Peaks (Sticks)", QMessageBox.ButtonRole.ActionRole
+        )
         cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
 
         msg_box.exec()

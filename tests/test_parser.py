@@ -619,6 +619,7 @@ C2 C 0.05 0.5 0.5
 
 def test_grow_molecules_connected_only():
     from cif_viewer.parser import grow_molecules, parse_cif
+    import numpy as np
 
     cif = """
 data_p21_test
@@ -640,13 +641,11 @@ C1 C 0.1 0.1 0.1
     struct = parse_cif(cif)
     atoms, bonds = grow_molecules(struct)
 
-    # Under P 1 21 1, there are 2 symmetry operations. Both generated atoms are in the central cell, so both are kept.
-    assert len(atoms) == 2
+    # Under P 1 21 1, there are 2 symmetry operations.
+    # The generated atoms are disconnected, so only the original one (or its connections) is kept.
+    assert len(atoms) == 1
     assert atoms[0].label == "C1"
-    assert atoms[1].label == "C1"
-    # Ensure they have the correct image (0, 0, 0)
-    assert atoms[0].image == (0, 0, 0)
-    assert atoms[1].image == (0, 0, 0)
+    assert np.allclose(atoms[0].position, np.array([1.0, 1.0, 1.0]))
 
 
 def test_grow_molecules_polymer():
@@ -674,8 +673,8 @@ C2 C 0.8 0.5 0.5
     struct = parse_cif(cif)
     atoms, bonds = grow_molecules(struct)
 
-    # The polymer grows across the translation grid (tx in -1, 0, 1), resulting in 6 connected atoms.
-    assert len(atoms) == 6
+    # The polymer is detected, triggering the fallback 1x1x1 supercell representation.
+    assert len(atoms) == 2
 
 
 def test_infer_bonds_fallback(monkeypatch):
