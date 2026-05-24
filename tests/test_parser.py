@@ -613,8 +613,8 @@ C2 C 0.05 0.5 0.5
 """
     struct = parse_cif(cif)
     atoms, bonds = grow_molecules(struct)
-    assert len(atoms) == 4
-    assert len(bonds) == 2
+    assert len(atoms) == 2
+    assert len(bonds) == 1
 
 
 def test_grow_molecules_connected_only():

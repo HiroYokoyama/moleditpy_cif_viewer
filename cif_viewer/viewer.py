@@ -216,7 +216,7 @@ class CifViewerWidget(QWidget):
         struct_layout.addWidget(self.determine_bond_order)
 
         self.bond_order_disabled_label = QLabel(
-            "  ⚠ Disabled: not available when \"All Parts\" is selected."
+            '  ⚠ Disabled: not available when "All Parts" is selected.'
         )
         self.bond_order_disabled_label.setStyleSheet("color: gray; font-style: italic;")
         self.bond_order_disabled_label.setVisible(False)
@@ -1403,7 +1403,10 @@ class CifViewerWidget(QWidget):
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
         max_atoms = self.max_atoms_spin.value()
-        if self.determine_bond_order.isChecked() and self.determine_bond_order.isEnabled():
+        if (
+            self.determine_bond_order.isChecked()
+            and self.determine_bond_order.isEnabled()
+        ):
             if len(atoms) > max_atoms:
                 summary_text += (
                     f" (Bond order determination skipped: over {max_atoms} atoms limit)"

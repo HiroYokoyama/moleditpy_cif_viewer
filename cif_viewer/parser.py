@@ -352,7 +352,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
 
         for name, block in parser._cif.data.items():
             try:
-                struct = parser._get_structure(block, primitive=False, symmetrized=False)
+                struct = parser._get_structure(
+                    block, primitive=False, symmetrized=False
+                )
                 if struct is None:
                     continue
 
@@ -372,7 +374,8 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                         symops = sga.get_space_group_operations()
                     except Exception as exc:
                         logging.debug(
-                            "SpacegroupAnalyzer get_space_group_operations failed: %s", exc
+                            "SpacegroupAnalyzer get_space_group_operations failed: %s",
+                            exc,
                         )
 
                 label_to_adp = {}
@@ -409,7 +412,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                                     for suffix in ["11", "22", "33", "12", "13", "23"]:
                                         col = val_cols.get(suffix)
                                         val = 0.0
-                                        if col and i < len(block_data_lower[col.lower()]):
+                                        if col and i < len(
+                                            block_data_lower[col.lower()]
+                                        ):
                                             val = parse_cif_number(
                                                 block_data_lower[col.lower()][i]
                                             )
@@ -500,7 +505,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                         else:
                             u_cart_list.append(np.zeros((3, 3)))
 
-                    if u_cart_list and any(not np.allclose(m, 0.0) for m in u_cart_list):
+                    if u_cart_list and any(
+                        not np.allclose(m, 0.0) for m in u_cart_list
+                    ):
                         u_cart_data = np.array(u_cart_list, dtype=float)
 
                 # Build label_to_disorder map
@@ -519,9 +526,13 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
 
                 if label_key is not None:
                     labels = block_data_lower[label_key]
-                    groups = block_data_lower[group_key] if group_key is not None else []
+                    groups = (
+                        block_data_lower[group_key] if group_key is not None else []
+                    )
                     assemblies = (
-                        block_data_lower[assembly_key] if assembly_key is not None else []
+                        block_data_lower[assembly_key]
+                        if assembly_key is not None
+                        else []
                     )
                     for idx_lbl, lbl in enumerate(labels):
                         try:
@@ -543,7 +554,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                             label_to_disorder[clean_lbl] = (g, a)
                         except Exception as exc:
                             logging.debug(
-                                "Failed to parse disorder info for label %s: %s", lbl, exc
+                                "Failed to parse disorder info for label %s: %s",
+                                lbl,
+                                exc,
                             )
 
                 # Extract cell metadata and refinement factors
@@ -577,7 +590,8 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                         space_group_number = str(struct.get_space_group_info()[1])
                     except Exception as exc:
                         logging.debug(
-                            "Failed to get space group number info from structure: %s", exc
+                            "Failed to get space group number info from structure: %s",
+                            exc,
                         )
                 if not space_group_number:
                     try:
@@ -637,7 +651,10 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 )
                 goof = _get_first_tag_value(
                     block_data_lower,
-                    ["_refine_ls_goodness_of_fit_ref", "_refine_ls_goodness_of_fit_all"],
+                    [
+                        "_refine_ls_goodness_of_fit_ref",
+                        "_refine_ls_goodness_of_fit_all",
+                    ],
                 )
 
                 num_symops = (
@@ -678,9 +695,6 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
                 logging.error("Failed to parse structure block %s: %s", name, exc)
 
         return structures
-
-
-
 
 
 def _structure_from_pymatgen(
@@ -949,6 +963,56 @@ def get_space_group_operations(structure: CifStructure) -> list:
     return symops
 
 
+def _infer_periodic_adjacency(structure: CifStructure):
+    adjacency = {atom_index: [] for atom_index in range(len(structure.atoms))}
+    for left_index in range(len(structure.atoms)):
+        left_atom = structure.atoms[left_index]
+        left_radius = covalent_radius(left_atom.element)
+
+        for right_index in range(left_index, len(structure.atoms)):
+            right_atom = structure.atoms[right_index]
+            right_radius = covalent_radius(right_atom.element)
+            cutoff = min(2.45, left_radius + right_radius + 0.45)
+
+            if (
+                left_atom.disorder_key is not None
+                and right_atom.disorder_key is not None
+            ):
+                if left_atom.disorder_key != right_atom.disorder_key:
+                    continue
+
+            delta_frac = np.asarray(right_atom.fract) - np.asarray(left_atom.fract)
+
+            # Find the minimum image shift as the baseline to support un-normalized coordinates
+            base_shift = -np.rint(delta_frac).astype(int)
+
+            # Sweep a 3x3x3 grid around the minimum image to catch multi-path boundary bonds
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        shift = base_shift + np.array([dx, dy, dz], dtype=int)
+
+                        # Skip self-comparison at zero net shift
+                        if left_index == right_index and np.all(shift == 0):
+                            continue
+
+                        shifted_delta = delta_frac + shift
+                        distance = float(
+                            np.linalg.norm(
+                                fractional_to_cartesian(
+                                    shifted_delta, structure.lattice
+                                )
+                            )
+                        )
+
+                        if 0.25 <= distance <= cutoff:
+                            adjacency[left_index].append((right_index, shift))
+                            if left_index != right_index:
+                                adjacency[right_index].append((left_index, -shift))
+
+    return adjacency
+
+
 def grow_molecules(
     structure: CifStructure,
     selected_disorder_key: Optional[str] = None,
@@ -958,13 +1022,54 @@ def grow_molecules(
     Grow molecules to completion by applying symmetry operations and translations.
     Returns only completed molecules that intersect the central unit cell.
     """
-    core_atoms = (
-        structure.asymmetric_atoms
-        if structure.asymmetric_atoms is not None
-        else structure.atoms
-    )
-    if not core_atoms:
+    if not structure.atoms:
         return [], []
+
+    adjacency = _infer_periodic_adjacency(structure)
+
+    # Correct polymer detection: Check if a path leads back to a visited atom
+    # but in a different periodic image (indicating an infinite network).
+    is_polymer = False
+    visited_shifts = {}
+
+    for start_node in range(len(structure.atoms)):
+        if start_node in visited_shifts:
+            continue
+
+        queue = [(start_node, np.zeros(3, dtype=int))]
+        visited_shifts[start_node] = np.zeros(3, dtype=int)
+
+        while queue:
+            curr, curr_shift = queue.pop(0)
+
+            for neighbor, edge_shift in adjacency[curr]:
+                net_shift = curr_shift + edge_shift
+
+                if neighbor in visited_shifts:
+                    if not np.array_equal(visited_shifts[neighbor], net_shift):
+                        is_polymer = True
+                        break
+                else:
+                    visited_shifts[neighbor] = net_shift
+                    queue.append((neighbor, net_shift))
+
+            if is_polymer:
+                break
+        if is_polymer:
+            break
+
+    if is_polymer:
+        logging.info(
+            "Polymer structure detected (periodic bond via adjacency). "
+            "Displaying 1x1x1 unit cell for Whole Molecule mode."
+        )
+        return expand_supercell(
+            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
+        )
+
+    # CRITICAL FIX: Unwrap the asymmetric unit FIRST so scattered coordinate fragments
+    # are physically brought together before the symmetry generator multiplies them.
+    core_atoms = unwrap_connected_atoms(structure)
 
     symops = get_space_group_operations(structure)
     if not symops:
@@ -974,7 +1079,7 @@ def grow_molecules(
 
     candidate_atoms: List[RenderAtom] = []
 
-    # Generate candidate atoms in a 3x3x3 block of cells
+    # Generate candidate atoms using the contiguous, unwrapped core
     for base_index, atom in enumerate(core_atoms):
         if selected_disorder_key is not None:
             if atom.disorder_group is not None:
@@ -1028,21 +1133,6 @@ def grow_molecules(
     if not candidate_atoms:
         return [], []
 
-    adjacency = _infer_periodic_adjacency(structure)
-    is_polymer = any(
-        any(not np.allclose(shift, np.zeros(3, dtype=int)) for _, shift in neighs)
-        for neighs in adjacency.values()
-    )
-
-    if is_polymer:
-        logging.info(
-            "Polymer structure detected (periodic bond via adjacency). "
-            "Displaying 1x1x1 unit cell for Whole Molecule mode."
-        )
-        return expand_supercell(
-            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
-        )
-
     # Build bonds between all candidates
     bonds = infer_bonds(candidate_atoms, tolerance=tolerance)
 
@@ -1092,64 +1182,6 @@ def grow_molecules(
                             visited[neighbor] = True
                             queue.append(neighbor)
                 components.append(comp)
-
-    # Build bonds between all candidates
-    bonds = infer_bonds(candidate_atoms, tolerance=tolerance)
-
-    # Run BFS/DFS to identify components
-    num_atoms = len(candidate_atoms)
-    adj = {i: [] for i in range(num_atoms)}
-    for u, v in bonds:
-        adj[u].append(v)
-        adj[v].append(u)
-
-    components = None
-    try:
-        from rdkit import Chem
-
-        rw_mol = Chem.RWMol()
-        for _ in range(num_atoms):
-            rw_mol.AddAtom(Chem.Atom("C"))
-
-        seen_bonds = set()
-        for u, v in bonds:
-            key = tuple(sorted((int(u), int(v))))
-            if key not in seen_bonds:
-                seen_bonds.add(key)
-                rw_mol.AddBond(key[0], key[1], Chem.BondType.SINGLE)
-
-        mol_temp = rw_mol.GetMol()
-        components = Chem.GetMolFrags(mol_temp, asMols=False)
-    except Exception as exc:
-        logging.warning(
-            "RDKit component analysis failed, falling back to manual implementation: %s",
-            exc,
-        )
-
-    if components is None:
-        visited = [False] * num_atoms
-        components = []
-        for i in range(num_atoms):
-            if not visited[i]:
-                comp = []
-                queue = [i]
-                visited[i] = True
-                while queue:
-                    curr = queue.pop(0)
-                    comp.append(curr)
-                    for neighbor in adj[curr]:
-                        if not visited[neighbor]:
-                            visited[neighbor] = True
-                            queue.append(neighbor)
-                components.append(comp)
-
-    if is_polymer:
-        logging.info(
-            "Polymer structure detected. Displaying 1x1x1 unit cell for Whole Molecule mode."
-        )
-        return expand_supercell(
-            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
-        )
 
     # Keep components which contain at least one original asymmetric unit atom (is_original_asym == True)
     kept_indices = []
@@ -1211,35 +1243,6 @@ def unwrap_connected_atoms(structure: CifStructure) -> List[CifAtom]:
             )
         )
     return unwrapped
-
-
-def _infer_periodic_adjacency(structure: CifStructure):
-    adjacency = {atom_index: [] for atom_index in range(len(structure.atoms))}
-    for left_index in range(len(structure.atoms)):
-        left_atom = structure.atoms[left_index]
-        left_radius = covalent_radius(left_atom.element)
-        for right_index in range(left_index + 1, len(structure.atoms)):
-            right_atom = structure.atoms[right_index]
-            right_radius = covalent_radius(right_atom.element)
-            cutoff = min(2.45, left_radius + right_radius + 0.45)
-            if (
-                left_atom.disorder_key is not None
-                and right_atom.disorder_key is not None
-            ):
-                if left_atom.disorder_key != right_atom.disorder_key:
-                    continue
-            delta_frac = np.asarray(right_atom.fract) - np.asarray(left_atom.fract)
-            image_shift = -np.rint(delta_frac).astype(int)
-            minimum_delta = delta_frac + image_shift
-            distance = float(
-                np.linalg.norm(
-                    fractional_to_cartesian(minimum_delta, structure.lattice)
-                )
-            )
-            if 0.25 <= distance <= cutoff:
-                adjacency[left_index].append((right_index, image_shift))
-                adjacency[right_index].append((left_index, -image_shift))
-    return adjacency
 
 
 def supercell_edges(
