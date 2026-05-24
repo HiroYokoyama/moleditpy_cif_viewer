@@ -1335,8 +1335,10 @@ class CifViewerWidget(QWidget):
         mol_bonds = bonds if self.show_bonds.isChecked() else []
         try:
             max_atoms = self.max_atoms_spin.value()
-            determine_bo = self.determine_bond_order.isChecked() and (
-                len(atoms) <= max_atoms
+            determine_bo = (
+                self.determine_bond_order.isChecked()
+                and self.determine_bond_order.isEnabled()
+                and len(atoms) <= max_atoms
             )
             mol = render_atoms_to_rdkit_mol(
                 atoms, mol_bonds, determine_bond_order=determine_bo
@@ -1401,7 +1403,7 @@ class CifViewerWidget(QWidget):
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
         max_atoms = self.max_atoms_spin.value()
-        if self.determine_bond_order.isChecked():
+        if self.determine_bond_order.isChecked() and self.determine_bond_order.isEnabled():
             if len(atoms) > max_atoms:
                 summary_text += (
                     f" (Bond order determination skipped: over {max_atoms} atoms limit)"
