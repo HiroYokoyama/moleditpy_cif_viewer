@@ -2048,11 +2048,16 @@ def test_cif_viewer_widget_render_thread_cancellation(qtbot, monkeypatch):
     import numpy as np
     from rdkit import Chem
 
-    # Mock _run_render_calculation to sleep, simulating a slow/long computation
+    # Mock _run_render_calculation to sleep, simulating a slow/long computation cooperatively
     from cif_viewer import viewer
 
+    stop_event = False
+
     def slow_run_calc(*args, **kwargs):
-        time.sleep(2.0)
+        for _ in range(40):
+            if stop_event:
+                break
+            time.sleep(0.05)
         return [], [], Chem.Mol()
 
     monkeypatch.setattr(viewer, "_run_render_calculation", slow_run_calc)
@@ -2136,6 +2141,13 @@ def test_cif_viewer_widget_render_thread_cancellation(qtbot, monkeypatch):
         and len(dialogs_created) == 1,
         timeout=2000,
     )
+
+    # Mock terminate to cooperatively stop the loop instead of hard killing the thread
+    def mock_terminate():
+        nonlocal stop_event
+        stop_event = True
+
+    monkeypatch.setattr(widget._render_thread, "terminate", mock_terminate)
 
     # Cancel the dialog
     dialog = dialogs_created[0]
