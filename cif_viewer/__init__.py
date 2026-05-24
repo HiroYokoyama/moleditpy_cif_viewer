@@ -1,4 +1,7 @@
+import os
 import logging
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QApplication, QProgressDialog
 
 PLUGIN_NAME = "CIF Viewer"
 PLUGIN_VERSION = "0.8.0"
@@ -186,6 +189,28 @@ def initialize(context):
             ):
                 mw.view_3d_manager.set_3d_style("ball_and_stick")
             return
+
+        is_headless = (
+            os.environ.get("MOLEDITPY_HEADLESS") == "1"
+            or os.environ.get("QT_QPA_PLATFORM") == "offscreen"
+            or "PYTEST_CURRENT_TEST" in os.environ
+        )
+        progress = None
+        if (
+            widget is not None
+            and not is_headless
+            and len(widget.last_rendered_atoms) > 50
+        ):
+            try:
+                progress = QProgressDialog(
+                    "Drawing thermal ellipsoids, please wait...", None, 0, 0, widget
+                )
+                progress.setWindowTitle("Drawing")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.show()
+                QApplication.processEvents()
+            except Exception:  # pylint: disable=broad-exception-caught
+                progress = None
 
         should_restore_camera = True
         if widget is not None:
@@ -546,11 +571,15 @@ def initialize(context):
             except Exception as e:
                 logging.debug("Failed to reset camera in draw_ellipsoid_model: %s", e)
 
-        try:
-            from PyQt6.QtCore import QTimer
+        if progress is not None:
+            try:
+                progress.close()
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
 
+        try:
             QTimer.singleShot(50, render_axes)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             render_axes()
 
     context.add_menu_action("View/CIF Viewer Panel", open_from_menu)

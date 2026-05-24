@@ -2028,10 +2028,9 @@ def test_cif_viewer_widget_render_thread_asynchronous(qtbot, monkeypatch):
     # Trigger render
     widget._render_now()
 
-    # Wait for the async worker thread to finish
+    # Wait for the async worker thread to finish and update the atoms
     qtbot.waitUntil(
-        lambda: widget._render_thread is not None
-        and not widget._render_thread.isRunning(),
+        lambda: getattr(widget, "last_rendered_atoms", None) is not None,
         timeout=5000,
     )
 
