@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -31,16 +31,114 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QRadioButton,
     QButtonGroup,
+    QProgressDialog,
 )
 
 from .parser import (
     CifStructure,
     celleditpy_cell_axis_segments,
-    expand_supercell,
     parse_cif_file,
     parse_cif_file_pymatgen,
 )
 from .rdkit_bridge import render_atoms_to_rdkit_mol
+
+
+def _run_render_calculation(
+    structure_to_render,
+    view_mode,
+    selected_key,
+    repeats,
+    keep_connected,
+    tolerance,
+    determine_bo,
+    max_atoms,
+    show_hydrogens,
+    show_bonds,
+):
+    from .parser import grow_molecules, expand_supercell
+
+    if view_mode == "Whole Molecule":
+        atoms, bonds = grow_molecules(
+            structure_to_render,
+            selected_disorder_key=selected_key,
+            tolerance=tolerance,
+        )
+    else:
+        atoms, bonds = expand_supercell(
+            structure_to_render,
+            repeats,
+            keep_connected=keep_connected,
+            tolerance=tolerance,
+        )
+
+    mol_bonds = bonds if show_bonds else []
+    det_bo = determine_bo and len(atoms) <= max_atoms
+    mol = render_atoms_to_rdkit_mol(atoms, mol_bonds, determine_bond_order=det_bo)
+    mol.SetProp("_from_cif_viewer", "1")
+
+    if not show_hydrogens:
+        from rdkit import Chem
+
+        try:
+            mol = Chem.RemoveHs(mol)
+        except Exception as e:
+            logging.debug("RemoveHs failed: %s", e)
+        last_rendered_atoms = [atom for atom in atoms if atom.element != "H"]
+    else:
+        last_rendered_atoms = atoms
+
+    return last_rendered_atoms, bonds, mol
+
+
+class RenderThread(QThread):
+    result_ready = pyqtSignal(list, list, object, str)
+
+    def __init__(
+        self,
+        structure_to_render,
+        view_mode,
+        selected_key,
+        repeats,
+        keep_connected,
+        tolerance,
+        determine_bo,
+        max_atoms,
+        show_hydrogens,
+        show_bonds,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.structure_to_render = structure_to_render
+        self.view_mode = view_mode
+        self.selected_key = selected_key
+        self.repeats = repeats
+        self.keep_connected = keep_connected
+        self.tolerance = tolerance
+        self.determine_bo = determine_bo
+        self.max_atoms = max_atoms
+        self.show_hydrogens = show_hydrogens
+        self.show_bonds = show_bonds
+
+    def run(self):
+        try:
+            last_rendered_atoms, bonds, mol = _run_render_calculation(
+                self.structure_to_render,
+                self.view_mode,
+                self.selected_key,
+                self.repeats,
+                self.keep_connected,
+                self.tolerance,
+                self.determine_bo,
+                self.max_atoms,
+                self.show_hydrogens,
+                self.show_bonds,
+            )
+            self.result_ready.emit(last_rendered_atoms, bonds, mol, "")
+        except Exception as exc:
+            import traceback
+
+            err_trace = traceback.format_exc()
+            self.result_ready.emit([], [], None, f"{exc}\n{err_trace}")
 
 
 class CifViewerWidget(QWidget):
@@ -54,8 +152,7 @@ class CifViewerWidget(QWidget):
         self.current_path: Optional[str] = None
         self.overlay_actor_names = []
         self._reset_camera_on_next_render = True
-
-        from PyQt6.QtCore import QTimer
+        self._render_thread = None
 
         self.render_timer = QTimer(self)
         self.render_timer.setSingleShot(True)
@@ -1342,9 +1439,18 @@ class CifViewerWidget(QWidget):
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
 
-        from PyQt6.QtCore import QTimer
-
         QTimer.singleShot(100, self.render)
+
+    def closeEvent(self, event):
+        if self._render_thread is not None:
+            try:
+                self._render_thread.result_ready.disconnect()
+            except TypeError:
+                pass
+            self._render_thread.terminate()
+            self._render_thread.wait()
+            self._render_thread = None
+        super().closeEvent(event)
 
     def clear_view(self, redraw=True):
         plotter = self._plotter()
@@ -1392,10 +1498,9 @@ class CifViewerWidget(QWidget):
         if plotter is None:
             return
 
-        self.clear_view()
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
-
         view_mode = self._get_current_view_mode()
+
         if view_mode in ("Asymmetric Unit", "Whole Molecule"):
             base_atoms = (
                 self.structure.asymmetric_atoms
@@ -1435,88 +1540,184 @@ class CifViewerWidget(QWidget):
         structure_to_render = dataclasses.replace(self.structure, **replace_kwargs)
 
         tol = 0.45
+        determine_bo = (
+            self.determine_bond_order.isChecked()
+            and self.determine_bond_order.isEnabled()
+        )
+        max_atoms = self.max_atoms_spin.value()
+        show_hydrogens = self.show_hydrogens.isChecked()
+        show_bonds = self.show_bonds.isChecked()
 
-        if view_mode == "Whole Molecule":
-            from .parser import grow_molecules
+        # Stop any existing render thread
+        if self._render_thread is not None:
+            try:
+                self._render_thread.result_ready.disconnect()
+            except TypeError:
+                pass
+            self._render_thread.terminate()
+            self._render_thread.wait()
+            self._render_thread = None
 
-            atoms, bonds = grow_molecules(
-                structure_to_render, selected_disorder_key=selected_key, tolerance=tol
+        # Create thread
+        self._render_thread = RenderThread(
+            structure_to_render,
+            view_mode,
+            selected_key,
+            repeats,
+            self.keep_connected.isChecked(),
+            tol,
+            determine_bo,
+            max_atoms,
+            show_hydrogens,
+            show_bonds,
+            parent=self,
+        )
+
+        # Estimate number of atoms to decide if we show progress dialog
+        est_atoms = len(self.structure.atoms)
+        if view_mode == "Packing":
+            est_atoms *= repeats[0] * repeats[1] * repeats[2]
+        elif view_mode == "Whole Molecule":
+            try:
+                from .parser import get_space_group_operations
+
+                symops = get_space_group_operations(self.structure)
+                num_ops = len(symops) if symops else 1
+            except Exception:
+                num_ops = 1
+            est_atoms *= num_ops
+
+        is_headless = (
+            os.environ.get("MOLEDITPY_HEADLESS") == "1"
+            or os.environ.get("QT_QPA_PLATFORM") == "offscreen"
+            or "PYTEST_CURRENT_TEST" in os.environ
+        )
+
+        if is_headless:
+            # Sync run in headless/pytest so tests block until completed
+            try:
+                last_rendered_atoms, bonds, mol = _run_render_calculation(
+                    structure_to_render,
+                    view_mode,
+                    selected_key,
+                    repeats,
+                    self.keep_connected.isChecked(),
+                    tol,
+                    determine_bo,
+                    max_atoms,
+                    show_hydrogens,
+                    show_bonds,
+                )
+                self._on_render_data_ready(last_rendered_atoms, bonds, mol, "", repeats)
+            except Exception as exc:
+                self._on_render_data_ready([], [], None, str(exc), repeats)
+            return
+
+        if est_atoms > 250:
+            progress_dialog = QProgressDialog(
+                "Rendering CIF structure, please wait...", "Cancel", 0, 0, self
             )
+            progress_dialog.setWindowTitle("Rendering")
+            progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            progress_dialog.setWindowFlags(
+                progress_dialog.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
+            )
+
+            def on_cancel():
+                if self._render_thread is not None:
+                    try:
+                        self._render_thread.result_ready.disconnect()
+                    except TypeError:
+                        pass
+                    self._render_thread.terminate()
+                    self._render_thread.wait()
+                    self._render_thread = None
+
+            progress_dialog.canceled.connect(on_cancel)
+            progress_dialog.show()
+
+            def on_ready(last_rendered_atoms, bonds, mol, err_msg):
+                progress_dialog.close()
+                self._on_render_data_ready(
+                    last_rendered_atoms, bonds, mol, err_msg, repeats
+                )
+
+            self._render_thread.result_ready.connect(on_ready)
+            self._render_thread.start()
         else:
-            atoms, bonds = expand_supercell(
-                structure_to_render,
-                repeats,
-                keep_connected=self.keep_connected.isChecked(),
-                tolerance=tol,
-            )
-        mol_bonds = bonds if self.show_bonds.isChecked() else []
-        try:
-            max_atoms = self.max_atoms_spin.value()
-            determine_bo = (
-                self.determine_bond_order.isChecked()
-                and self.determine_bond_order.isEnabled()
-                and len(atoms) <= max_atoms
-            )
-            mol = render_atoms_to_rdkit_mol(
-                atoms, mol_bonds, determine_bond_order=determine_bo
-            )
-            # Tag the molecule so custom styles and overlays know it's from CIF viewer
-            mol.SetProp("_from_cif_viewer", "1")
 
-            if not self.show_hydrogens.isChecked():
-                from rdkit import Chem
+            def on_ready(last_rendered_atoms, bonds, mol, err_msg):
+                self._on_render_data_ready(
+                    last_rendered_atoms, bonds, mol, err_msg, repeats
+                )
 
-                try:
-                    mol = Chem.RemoveHs(mol)
-                except Exception as e:
-                    logging.debug("RemoveHs failed: %s", e)
-                self.last_rendered_atoms = [
-                    atom for atom in atoms if atom.element != "H"
-                ]
-            else:
-                self.last_rendered_atoms = atoms
-        except Exception as exc:
+            self._render_thread.result_ready.connect(on_ready)
+            self._render_thread.start()
+
+    def _on_render_data_ready(self, last_rendered_atoms, bonds, mol, err_msg, repeats):
+        if err_msg:
+            if "terminate" in err_msg or not last_rendered_atoms:
+                return
             QMessageBox.critical(
-                self, "CIF Viewer", f"Could not build RDKit view:\n{exc}"
+                self, "CIF Viewer", f"Could not build RDKit view:\n{err_msg}"
             )
             return
 
-        self._draw_with_moleditpy(mol)
+        self.last_rendered_atoms = last_rendered_atoms
+
+        try:
+            self._draw_with_moleditpy(mol)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "CIF Viewer", f"Could not draw with MoleditPy:\n{exc}"
+            )
+            return
 
         def draw_overlays_and_render():
-            plotter = self._plotter()
-            if plotter is None:
-                return
+            try:
+                from PyQt6 import sip
 
-            self.clear_view()
-
-            if (
-                self.show_cell.isChecked()
-                and self._get_current_view_mode() == "Packing"
-            ):
-                self._draw_cell_overlay(plotter, repeats)
+                if sip.isdeleted(self):
+                    return
+            except ImportError:
+                pass
 
             try:
+                plotter = self._plotter()
+                if plotter is None:
+                    return
+
+                self.clear_view()
+
+                if (
+                    self.show_cell.isChecked()
+                    and self._get_current_view_mode() == "Packing"
+                ):
+                    self._draw_cell_overlay(plotter, repeats)
+
                 if getattr(self, "_reset_camera_on_next_render", True):
                     plotter.reset_camera()
                     self._reset_camera_on_next_render = False
                 plotter.render()
+            except RuntimeError as exc:
+                if "deleted" in str(exc):
+                    return
+                logging.error("RuntimeError in draw_overlays_and_render: %s", exc)
             except Exception as exc:
                 logging.error("Failed to reset camera or render cell: %s", exc)
 
         try:
-            from PyQt6.QtCore import QTimer
-
-            QTimer.singleShot(100, draw_overlays_and_render)
+            QTimer.singleShot(100, self, draw_overlays_and_render)
         except Exception as exc:
             logging.warning(
-                "Failed to schedule draw_overlays_and_render with QTimer: %s", exc
+                "Failed to schedule draw_overlays_and_render with QTimer: %s",
+                exc,
             )
             draw_overlays_and_render()
 
         summary_text = (
             f"{len(self.structure.atoms)} completed unit-cell atoms, "
-            f"{len(atoms)} rendered atoms, {len(bonds)} inferred bonds, "
+            f"{len(last_rendered_atoms)} rendered atoms, {len(bonds)} inferred bonds, "
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
         max_atoms = self.max_atoms_spin.value()
@@ -1524,7 +1725,7 @@ class CifViewerWidget(QWidget):
             self.determine_bond_order.isChecked()
             and self.determine_bond_order.isEnabled()
         ):
-            if len(atoms) > max_atoms:
+            if len(last_rendered_atoms) > max_atoms:
                 summary_text += (
                     f" (Bond order determination skipped: over {max_atoms} atoms limit)"
                 )

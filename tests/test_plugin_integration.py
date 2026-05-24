@@ -1942,3 +1942,211 @@ def test_cif_viewer_widget_is_asymmetric_unit_only_passed_to_grow_molecules(
     # Assert that is_asymmetric_unit_only flag was set to True
     assert hasattr(captured_struct[0], "is_asymmetric_unit_only")
     assert captured_struct[0].is_asymmetric_unit_only is True
+
+
+def test_cif_viewer_widget_render_thread_asynchronous(qtbot, monkeypatch):
+    import os
+    from cif_viewer.viewer import CifViewerWidget
+    from cif_viewer.parser import CifStructure, CifAtom
+    import numpy as np
+    from rdkit import Chem
+
+    # Mock render_atoms_to_rdkit_mol to return a dummy molecule instantly
+    monkeypatch.setattr(
+        "cif_viewer.viewer.render_atoms_to_rdkit_mol",
+        lambda *args, **kwargs: Chem.Mol(),
+    )
+
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+
+    # Use a small structure with 10 atoms
+    lattice = np.eye(3) * 10.0
+    atoms = [
+        CifAtom(
+            f"C{i}",
+            "C",
+            np.array([i / 10.0, 0.0, 0.0]),
+            np.array([i, 0.0, 0.0]),
+        )
+        for i in range(10)
+    ]
+    struct = CifStructure(
+        "large_struct",
+        (10.0, 10.0, 10.0),
+        (90.0, 90.0, 90.0),
+        lattice,
+        tuple(atoms),
+    )
+    widget.structure = struct
+
+    # Set view mode to Packing and repeats to 3x3x3 to trigger >250 atoms (10 * 27 = 270)
+    widget.radio_pack.blockSignals(True)
+    widget.radio_pack.setChecked(True)
+    widget.radio_pack.blockSignals(False)
+
+    for spin in (widget.repeat_a, widget.repeat_b, widget.repeat_c):
+        spin.blockSignals(True)
+        spin.setValue(3)
+        spin.blockSignals(False)
+
+    # Mock plotter and draw methods to avoid GUI drawing overhead
+    class MockPlotter:
+        def render(self):
+            pass
+
+        def reset_camera(self):
+            pass
+
+    plotter = MockPlotter()
+    monkeypatch.setattr(widget, "_plotter", lambda: plotter)
+    monkeypatch.setattr(widget, "_draw_with_moleditpy", lambda mol: None)
+
+    # Force asynchronous execution by removing headless/test environment indicators
+    monkeypatch.setenv("MOLEDITPY_HEADLESS", "0")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "windows")
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    # Mock QProgressDialog show/close methods to prevent headless GUI hanging
+    from PyQt6.QtWidgets import QProgressDialog
+
+    monkeypatch.setattr(QProgressDialog, "show", lambda self_dialog: None)
+    monkeypatch.setattr(QProgressDialog, "close", lambda self_dialog: None)
+
+    # Track QProgressDialog creation
+    dialogs_created = []
+    original_init = QProgressDialog.__init__
+
+    def mock_init(self_dialog, *args, **kwargs):
+        original_init(self_dialog, *args, **kwargs)
+        dialogs_created.append(self_dialog)
+
+    monkeypatch.setattr(QProgressDialog, "__init__", mock_init)
+
+    # Trigger render
+    widget._render_now()
+
+    # Wait for the async worker thread to finish
+    qtbot.waitUntil(
+        lambda: widget._render_thread is not None
+        and not widget._render_thread.isRunning(),
+        timeout=5000,
+    )
+
+    # Assert progress dialog was created
+    assert len(dialogs_created) == 1
+    # Verify the thread completed successfully and updated the atoms to 270 (10 * 3 * 3 * 3)
+    assert len(widget.last_rendered_atoms) == 270
+
+
+def test_cif_viewer_widget_render_thread_cancellation(qtbot, monkeypatch):
+    import os
+    import time
+    from cif_viewer.viewer import CifViewerWidget
+    from cif_viewer.parser import CifStructure, CifAtom
+    import numpy as np
+    from rdkit import Chem
+
+    # Mock _run_render_calculation to sleep, simulating a slow/long computation
+    from cif_viewer import viewer
+
+    def slow_run_calc(*args, **kwargs):
+        time.sleep(2.0)
+        return [], [], Chem.Mol()
+
+    monkeypatch.setattr(viewer, "_run_render_calculation", slow_run_calc)
+
+    monkeypatch.setattr(
+        "cif_viewer.viewer.render_atoms_to_rdkit_mol",
+        lambda *args, **kwargs: Chem.Mol(),
+    )
+
+    context = StubContext()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+
+    # Mock structure with 10 atoms
+    lattice = np.eye(3) * 10.0
+    atoms = [
+        CifAtom(
+            f"C{i}",
+            "C",
+            np.array([i / 10.0, 0.0, 0.0]),
+            np.array([i, 0.0, 0.0]),
+        )
+        for i in range(10)
+    ]
+    struct = CifStructure(
+        "large_struct",
+        (10.0, 10.0, 10.0),
+        (90.0, 90.0, 90.0),
+        lattice,
+        tuple(atoms),
+    )
+    widget.structure = struct
+
+    # Set view mode to Packing and repeats to 3x3x3 to trigger >250 atoms
+    widget.radio_pack.blockSignals(True)
+    widget.radio_pack.setChecked(True)
+    widget.radio_pack.blockSignals(False)
+
+    for spin in (widget.repeat_a, widget.repeat_b, widget.repeat_c):
+        spin.blockSignals(True)
+        spin.setValue(3)
+        spin.blockSignals(False)
+
+    class MockPlotter:
+        def render(self):
+            pass
+
+        def reset_camera(self):
+            pass
+
+    plotter = MockPlotter()
+    monkeypatch.setattr(widget, "_plotter", lambda: plotter)
+    monkeypatch.setattr(widget, "_draw_with_moleditpy", lambda mol: None)
+
+    monkeypatch.setenv("MOLEDITPY_HEADLESS", "0")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "windows")
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    from PyQt6.QtWidgets import QProgressDialog
+
+    monkeypatch.setattr(QProgressDialog, "show", lambda self_dialog: None)
+    monkeypatch.setattr(QProgressDialog, "close", lambda self_dialog: None)
+
+    dialogs_created = []
+    original_init = QProgressDialog.__init__
+
+    def mock_init(self_dialog, *args, **kwargs):
+        original_init(self_dialog, *args, **kwargs)
+        dialogs_created.append(self_dialog)
+
+    monkeypatch.setattr(QProgressDialog, "__init__", mock_init)
+
+    # Trigger render
+    widget._render_now()
+
+    # Wait until the thread starts and is running
+    qtbot.waitUntil(
+        lambda: widget._render_thread is not None
+        and widget._render_thread.isRunning()
+        and len(dialogs_created) == 1,
+        timeout=2000,
+    )
+
+    # Cancel the dialog
+    dialog = dialogs_created[0]
+    dialog.canceled.emit()
+
+    # Wait for the thread to be terminated
+    qtbot.waitUntil(
+        lambda: widget._render_thread is None,
+        timeout=3000,
+    )
+
+    # Verify widget.last_rendered_atoms was NOT updated
+    assert getattr(widget, "last_rendered_atoms", None) is None
