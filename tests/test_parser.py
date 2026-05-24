@@ -773,3 +773,129 @@ C2 0.05 0.02 0.03 0.005 0.006 0.007
         )
     finally:
         os.remove(temp_path)
+
+
+def test_grow_molecules_cross_boundary_connected():
+    """Regression: a P1 molecule straddling the cell boundary must be returned
+    as a single connected component, not two disconnected fragments."""
+    from cif_viewer.parser import grow_molecules, parse_cif
+    import numpy as np
+
+    # Three-atom chain: C1-C2-C3.  C2 and C3 are near x=0 and C1 is near x=1,
+    # so C1 bonds to C2 via the periodic boundary.  The old code produced two
+    # components (C1 alone and C2-C3) because tx=0 copies could not bridge.
+    cif = """
+data_cross_boundary
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.97 0.5 0.5
+C2 C 0.03 0.5 0.5
+C3 C 0.18 0.5 0.5
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+
+    # All three atoms must come back as one molecule
+    assert len(atoms) == 3, f"Expected 3 atoms, got {len(atoms)}"
+    assert len(bonds) == 2, f"Expected 2 bonds, got {len(bonds)}"
+
+    # The molecule must be spatially contiguous (max pairwise distance < cell/2)
+    positions = np.array([a.position for a in atoms])
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            dist = np.linalg.norm(positions[i] - positions[j])
+            assert dist < 5.0, (
+                f"Atoms {i} and {j} are {dist:.2f} Å apart — molecule is split"
+            )
+
+
+def test_grow_molecules_inversion_cross_boundary():
+    """Regression: a molecule on an inversion centre near the cell boundary
+    must be returned whole and connected, not as two half-molecules."""
+    from cif_viewer.parser import grow_molecules, parse_cif
+    import numpy as np
+
+    # P-1: inversion maps (x,y,z) -> (-x,-y,-z).
+    # Asymmetric unit atom near x=0.97 → inversion image near x=0.03.
+    # The two halves must bond and be returned as one molecule.
+    cif = """
+data_inv_boundary
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_H-M_alt 'P -1'
+loop_
+_symmetry_equiv_pos_as_xyz
+'x, y, z'
+'-x, -y, -z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.97 0.5 0.5
+C2 C 0.82 0.5 0.5
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+
+    # Inversion generates 4 sites total; the two that make the molecule
+    # centred near x≈0 should all be contiguous.
+    assert len(atoms) == 4, f"Expected 4 atoms, got {len(atoms)}"
+    assert len(bonds) >= 3, f"Expected ≥3 bonds, got {len(bonds)}"
+
+    positions = np.array([a.position for a in atoms])
+    centroid = positions.mean(axis=0)
+    for p in positions:
+        assert np.linalg.norm(p - centroid) < 5.0, (
+            "Molecule is not contiguous — fragment is too far from centroid"
+        )
+
+
+def test_grow_molecules_no_duplicate_images():
+    """Regression: a molecule near the cell boundary must appear exactly once,
+    not as two overlapping copies (one in the central cell, one from an image)."""
+    from cif_viewer.parser import grow_molecules, parse_cif
+
+    # Simple 2-atom molecule straddling x=0/1
+    cif = """
+data_no_dup
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.96 0.5 0.5
+C2 C 0.04 0.5 0.5
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+
+    # Must return exactly one complete molecule (2 atoms, 1 bond), not two
+    assert len(atoms) == 2, (
+        f"Expected 2 atoms (one molecule), got {len(atoms)} — possible duplicate image"
+    )
+    assert len(bonds) == 1, f"Expected 1 bond, got {len(bonds)}"
