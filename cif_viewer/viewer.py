@@ -100,7 +100,7 @@ class CifViewerWidget(QWidget):
 
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Supercell CIF",
+            "Export Current View CIF",
             "",
             "Crystallographic Information Files (*.cif)",
         )
@@ -108,6 +108,10 @@ class CifViewerWidget(QWidget):
             return
 
         try:
+            import dataclasses
+            from .parser import grow_molecules, write_supercell_cif
+
+            view_mode = self._get_current_view_mode()
             repeats = (
                 self.repeat_a.value(),
                 self.repeat_b.value(),
@@ -121,22 +125,94 @@ class CifViewerWidget(QWidget):
             ):
                 selected_key = self.disorder_combo.currentData()
 
-            from .parser import write_supercell_cif
+            # Build the same structure_to_render that _render_now uses
+            if view_mode in ("Asymmetric Unit", "Whole Molecule"):
+                base_atoms = (
+                    self.structure.asymmetric_atoms
+                    if self.structure.asymmetric_atoms is not None
+                    else self.structure.atoms
+                )
+            else:
+                base_atoms = self.structure.atoms
 
-            write_supercell_cif(
-                path,
-                self.structure,
-                repeats,
-                keep_connected=self.keep_connected.isChecked(),
-                selected_disorder_key=selected_key,
+            if selected_key is not None:
+                base_atoms = [
+                    a
+                    for a in base_atoms
+                    if a.disorder_group is None
+                    or a.disorder_group == selected_key
+                    or a.disorder_key == selected_key
+                ]
+
+            is_asym_only = (
+                view_mode in ("Asymmetric Unit", "Whole Molecule")
+                and self.structure.asymmetric_atoms is not None
             )
+            replace_kwargs = {
+                "atoms": tuple(base_atoms),
+                "asymmetric_atoms": tuple(base_atoms),
+            }
+            if hasattr(self.structure, "is_asymmetric_unit_only"):
+                replace_kwargs["is_asymmetric_unit_only"] = is_asym_only
+            structure_to_render = dataclasses.replace(self.structure, **replace_kwargs)
+
+            if view_mode == "Whole Molecule":
+                # Export the grown (complete) molecule as P1 1x1x1
+                render_atoms, _ = grow_molecules(
+                    structure_to_render,
+                    selected_disorder_key=selected_key,
+                )
+                # Convert RenderAtoms back to a 1x1x1 P1 structure for writing
+                from .parser import CifAtom
+
+                p1_atoms = [
+                    CifAtom(
+                        label=a.label,
+                        element=a.element,
+                        fract=a.position @ np.linalg.inv(self.structure.lattice),
+                        cart=a.position,
+                        occupancy=1.0,
+                    )
+                    for a in render_atoms
+                ]
+                tmp = dataclasses.replace(
+                    self.structure,
+                    atoms=tuple(p1_atoms),
+                    asymmetric_atoms=None,
+                )
+                write_supercell_cif(
+                    path,
+                    tmp,
+                    (1, 1, 1),
+                    keep_connected=False,
+                    selected_disorder_key=None,
+                )
+            elif view_mode == "Asymmetric Unit":
+                # Export just the asymmetric unit as P1 1x1x1
+                write_supercell_cif(
+                    path,
+                    structure_to_render,
+                    (1, 1, 1),
+                    keep_connected=False,
+                    selected_disorder_key=selected_key,
+                )
+            else:
+                # Packing: export supercell as before
+                write_supercell_cif(
+                    path,
+                    self.structure,
+                    repeats,
+                    keep_connected=self.keep_connected.isChecked(),
+                    selected_disorder_key=selected_key,
+                )
+
             QMessageBox.information(
-                self, "Export CIF", f"Successfully exported supercell to:\n{path}"
+                self,
+                "Export CIF",
+                f'Successfully exported "{view_mode}" view to:\n{path}',
             )
         except Exception as exc:
-            QMessageBox.critical(
-                self, "Export CIF", f"Failed to export supercell:\n{exc}"
-            )
+            QMessageBox.critical(self, "Export CIF", f"Failed to export:\n{exc}")
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -238,6 +314,11 @@ class CifViewerWidget(QWidget):
         max_atoms_row.addStretch(1)
         struct_layout.addLayout(max_atoms_row)
 
+        self.switch_ellipsoid_btn = QPushButton("Switch to Ellipsoids ▶")
+        self.switch_ellipsoid_btn.clicked.connect(self._switch_to_ellipsoids)
+        self.switch_ellipsoid_btn.setVisible(False)
+        struct_layout.addWidget(self.switch_ellipsoid_btn)
+
         struct_layout.addStretch(1)
 
         self.summary_label = QLabel(
@@ -246,7 +327,7 @@ class CifViewerWidget(QWidget):
         self.summary_label.setWordWrap(True)
         struct_layout.addWidget(self.summary_label)
 
-        self.export_button = QPushButton("Export Supercell CIF...")
+        self.export_button = QPushButton("Export Current View CIF...")
         self.export_button.clicked.connect(self._export_supercell)
         struct_layout.addWidget(self.export_button)
 
@@ -442,15 +523,14 @@ class CifViewerWidget(QWidget):
         self.show_hydrogens.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.show_hydrogens)
 
-        reset_supercell_button = QPushButton("Reset Supercell")
-        reset_supercell_button.clicked.connect(self.reset_supercell)
-        supercell_layout.addRow(reset_supercell_button)
-
         preset_row = QHBoxLayout()
+        btn_111 = QPushButton("1x1x1")
+        btn_111.clicked.connect(lambda: self.set_supercell_preset(1))
         btn_222 = QPushButton("2x2x2")
         btn_222.clicked.connect(lambda: self.set_supercell_preset(2))
         btn_333 = QPushButton("3x3x3")
         btn_333.clicked.connect(lambda: self.set_supercell_preset(3))
+        preset_row.addWidget(btn_111)
         preset_row.addWidget(btn_222)
         preset_row.addWidget(btn_333)
         supercell_layout.addRow("Presets:", preset_row)
@@ -657,26 +737,35 @@ class CifViewerWidget(QWidget):
         self.render()
 
     def _on_tab_changed(self, index):
-        tab_text = self.tabs.tabText(index)
-        if tab_text == "Supercell":
-            if not self.radio_pack.isChecked():
-                self.radio_pack.setChecked(True)
+        pass  # mode switching is driven by preset buttons and spinners, not tab selection
 
     def _repeat_spin(self):
         spin = QSpinBox()
         spin.setRange(1, 8)
         spin.setValue(1)
-        spin.valueChanged.connect(self.render)
+        spin.valueChanged.connect(self._on_supercell_spin_changed)
         return spin
 
+    def _on_supercell_spin_changed(self):
+        """Switch to Packing mode when a repeat spinner changes, then render."""
+        if not self.radio_pack.isChecked():
+            self.radio_pack.setChecked(True)
+        self._reset_camera_on_next_render = True
+        self.render()
+
     def set_supercell_preset(self, count: int):
+        """Apply a supercell preset and switch to Packing mode."""
         for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
             spin.blockSignals(True)
             spin.setValue(count)
             spin.blockSignals(False)
+        if not self.radio_pack.isChecked():
+            self.radio_pack.setChecked(True)
+        self._reset_camera_on_next_render = True
         self.render()
 
     def reset_supercell(self):
+        """Reset repeats to 1x1x1 (kept for API/test compatibility)."""
         self.set_supercell_preset(1)
 
     def view_from_axis(self, axis_name: str):
@@ -901,6 +990,13 @@ class CifViewerWidget(QWidget):
             # No disorder - bond order determination is allowed
             self.determine_bond_order.setEnabled(True)
             self.bond_order_disabled_label.setVisible(False)
+
+        # Show the ellipsoid shortcut button only when ADP data is present
+        has_adp = self.structure is not None and any(
+            getattr(a, "u_cart", None) is not None for a in self.structure.atoms
+        )
+        if hasattr(self, "switch_ellipsoid_btn"):
+            self.switch_ellipsoid_btn.setVisible(has_adp)
 
     def _update_info_ui(self):
         if self.structure is None:
@@ -1286,7 +1382,7 @@ class CifViewerWidget(QWidget):
         repeats = (self.repeat_a.value(), self.repeat_b.value(), self.repeat_c.value())
 
         view_mode = self._get_current_view_mode()
-        if view_mode == "Asymmetric Unit" or view_mode == "Whole Molecule":
+        if view_mode in ("Asymmetric Unit", "Whole Molecule"):
             base_atoms = (
                 self.structure.asymmetric_atoms
                 if self.structure.asymmetric_atoms is not None
@@ -1314,7 +1410,7 @@ class CifViewerWidget(QWidget):
         import dataclasses
 
         is_asym_only = (
-            view_mode == "Asymmetric Unit" or view_mode == "Whole Molecule"
+            view_mode in ("Asymmetric Unit", "Whole Molecule")
         ) and self.structure.asymmetric_atoms is not None
         replace_kwargs = {
             "atoms": tuple(base_atoms),
