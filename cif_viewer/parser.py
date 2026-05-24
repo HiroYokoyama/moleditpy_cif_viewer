@@ -1065,48 +1065,6 @@ def grow_molecules(
     if not structure.atoms:
         return [], []
 
-    adjacency = _infer_periodic_adjacency(structure)
-
-    # Correct polymer detection: Check if a path leads back to a visited atom
-    # but in a different periodic image (indicating an infinite network).
-    is_polymer = False
-    visited_shifts = {}
-
-    for start_node in range(len(structure.atoms)):
-        if start_node in visited_shifts:
-            continue
-
-        queue = [(start_node, np.zeros(3, dtype=int))]
-        visited_shifts[start_node] = np.zeros(3, dtype=int)
-
-        while queue:
-            curr, curr_shift = queue.pop(0)
-
-            for neighbor, edge_shift in adjacency[curr]:
-                net_shift = curr_shift + edge_shift
-
-                if neighbor in visited_shifts:
-                    if not np.array_equal(visited_shifts[neighbor], net_shift):
-                        is_polymer = True
-                        break
-                else:
-                    visited_shifts[neighbor] = net_shift
-                    queue.append((neighbor, net_shift))
-
-            if is_polymer:
-                break
-        if is_polymer:
-            break
-
-    if is_polymer:
-        logging.info(
-            "Polymer structure detected (periodic bond via adjacency). "
-            "Displaying 1x1x1 unit cell for Whole Molecule mode."
-        )
-        return expand_supercell(
-            structure, (1, 1, 1), keep_connected=True, tolerance=tolerance
-        )
-
     # CRITICAL FIX: Unwrap the asymmetric unit FIRST so scattered coordinate fragments
     # are physically brought together before the symmetry generator multiplies them.
     core_atoms = unwrap_connected_atoms(structure)
@@ -1240,10 +1198,10 @@ def grow_molecules(
                             queue.append(neighbor)
                 components.append(comp)
 
-    # Keep components which contain at least one original asymmetric unit atom (is_original_asym == True)
+    # Keep components which contain at least one atom in the central unit cell (image = 0,0,0)
     kept_indices = []
     for comp in components:
-        if any(candidate_atoms[idx].is_original_asym for idx in comp):
+        if any(candidate_atoms[idx].image == (0, 0, 0) for idx in comp):
             kept_indices.extend(comp)
 
     if not kept_indices:

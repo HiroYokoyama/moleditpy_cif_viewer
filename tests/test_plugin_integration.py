@@ -66,7 +66,6 @@ def test_initialize_registers_visualization_entry_points():
 
 def test_drop_handler_only_claims_cif_files(monkeypatch):
     context = StubContext()
-    opened = []
 
     initialize(context)
     callback = context.drop_handlers[0][0]
@@ -1685,7 +1684,7 @@ C2 C 0.2 0.2 0.2
     # Verify we have float pairs
     lines = content.strip().split("\n")
     assert len(lines) > 2
-    header = lines[0]
+
     first_data = lines[1].split(",")
     float(first_data[0])
     float(first_data[1])
@@ -1877,6 +1876,20 @@ def test_cif_viewer_widget_is_asymmetric_unit_only_passed_to_grow_molecules(
     # Setup a stub context
     context = StubContext()
     dock = None
+
+    # Mock plotter so _render_now doesn't return early
+    class FakePlotter:
+        def __init__(self):
+            self.rendered = False
+
+        def render(self):
+            self.rendered = True
+
+        def remove_actor(self, name):
+            pass
+
+    context.plotter = FakePlotter()
+
     widget = CifViewerWidget(dock, context)
     qtbot.addWidget(widget)
 
@@ -1897,17 +1910,28 @@ def test_cif_viewer_widget_is_asymmetric_unit_only_passed_to_grow_molecules(
     )
     widget.structure = struct
 
+    from cif_viewer.parser import RenderAtom
+
+    r_atom = RenderAtom(
+        label="C1",
+        element="C",
+        base_index=0,
+        image=(0, 0, 0),
+        position=np.array([0.0, 0.0, 0.0]),
+        is_original_asym=True,
+    )
+
     # Mock grow_molecules to capture the passed structure
     captured_struct = []
 
     def mock_grow_molecules(structure, *args, **kwargs):
         captured_struct.append(structure)
-        return ([atom], [])
+        return ([r_atom], [])
 
-    monkeypatch.setattr("cif_viewer.viewer.grow_molecules", mock_grow_molecules)
+    monkeypatch.setattr("cif_viewer.parser.grow_molecules", mock_grow_molecules)
 
     # Trigger render with Whole Molecule view mode
-    widget.view_mode_combo.setCurrentText("Whole Molecule")
+    widget._set_current_view_mode("Whole Molecule")
     widget._render_now()
 
     # Assert grow_molecules was called
