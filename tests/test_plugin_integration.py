@@ -585,6 +585,7 @@ def test_cif_viewer_widget_initialization(qtbot):
     assert widget.structure is None
     assert widget.repeat_a.value() == 1
     assert widget.show_bonds.isChecked() is True
+    assert widget.determine_bond_order.isChecked() is False
     assert widget._get_current_view_mode() == "Whole Molecule"
     assert widget.show_cell.isEnabled() is False
     assert widget.show_axes.isEnabled() is False
@@ -670,6 +671,7 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
 
     # Modify UI values away from defaults
     widget.show_bonds.setChecked(False)
+    widget.determine_bond_order.setChecked(True)
     widget.show_hydrogens.setChecked(False)
     widget.keep_connected.setChecked(False)
     widget.show_cell.setChecked(False)
@@ -688,6 +690,7 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
 
     # Verify values are restored to defaults
     assert widget.show_bonds.isChecked() is True
+    assert widget.determine_bond_order.isChecked() is False
     assert widget.show_hydrogens.isChecked() is True
     assert widget.keep_connected.isChecked() is True
     assert widget.show_cell.isChecked() is True
@@ -712,6 +715,7 @@ def test_cif_viewer_widget_reset_to_defaults(qtbot, tmp_path, monkeypatch):
     with open(settings_file, "r") as f:
         data = json.load(f)
     assert data["show_bonds"] is True
+    assert data["determine_bond_order"] is False
     assert data["show_hydrogens"] is True
     assert data["fix_h_size"] is True
     assert data["probability"] == 50.0
@@ -1814,7 +1818,8 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
 
     widget.radio_mol.setChecked(True)
 
-    # Case 1: <= 300 atoms (e.g. 100 atoms) -> determine_bond_order should be True
+    # Case 1: determine_bond_order unchecked -> determine_bond_order should be False even for 100 atoms
+    widget.determine_bond_order.setChecked(False)
     monkeypatch.setattr(
         "cif_viewer.parser.grow_molecules",
         lambda *args, **kwargs: ([DummyAtom() for _ in range(100)], []),
@@ -1824,9 +1829,16 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
         asymmetric_atoms=[DummyAtom() for _ in range(100)],
     )
     widget._render_now()
-    assert captured_kwargs.get("determine_bond_order") is True
+    assert captured_kwargs.get("determine_bond_order") is False
 
-    # Case 2: > 300 atoms (e.g. 301 atoms) -> determine_bond_order should be False
+    # Case 2: determine_bond_order checked and <= 300 atoms (e.g. 100 atoms) -> determine_bond_order should be True
+    captured_kwargs.clear()
+    widget.determine_bond_order.setChecked(True)
+    widget._render_now()
+    assert captured_kwargs.get("determine_bond_order") is True
+    assert "skipped" not in widget.summary_label.text()
+
+    # Case 3: determine_bond_order checked and > 300 atoms (e.g. 301 atoms) -> determine_bond_order should be False and warning shown
     captured_kwargs.clear()
     monkeypatch.setattr(
         "cif_viewer.parser.grow_molecules",
@@ -1838,3 +1850,7 @@ def test_cif_viewer_auto_determine_bond_order_based_on_atom_count(qtbot, monkeyp
     )
     widget._render_now()
     assert captured_kwargs.get("determine_bond_order") is False
+    # Checkbox itself should NOT be disabled or unchecked
+    assert widget.determine_bond_order.isChecked() is True
+    assert widget.determine_bond_order.isEnabled() is True
+    assert "skipped: over 300 atoms limit" in widget.summary_label.text()

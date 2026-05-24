@@ -407,6 +407,12 @@ class CifViewerWidget(QWidget):
         self.show_bonds.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.show_bonds)
 
+        self.determine_bond_order = QCheckBox("Determine bond order (RDKit)")
+        self.determine_bond_order.setChecked(False)
+        self.determine_bond_order.toggled.connect(self.render)
+        self.determine_bond_order.toggled.connect(self.save_settings)
+        supercell_layout.addRow(self.determine_bond_order)
+
         self.show_hydrogens = QCheckBox("Show hydrogen atoms")
         self.show_hydrogens.setChecked(True)
         self.show_hydrogens.toggled.connect(self.render)
@@ -730,6 +736,7 @@ class CifViewerWidget(QWidget):
         self.radio_asym.blockSignals(True)
         self.radio_mol.blockSignals(True)
         self.radio_pack.blockSignals(True)
+        self.determine_bond_order.blockSignals(True)
 
         try:
             self.show_bonds.setChecked(True)
@@ -743,6 +750,7 @@ class CifViewerWidget(QWidget):
             self.h_scale_spin.setValue(20.0)
             self.axis_width.setValue(5)
             self.ellipsoid_ring_width.setValue(2)
+            self.determine_bond_order.setChecked(False)
 
             idx = self.axis_font.findText("arial")
             if idx >= 0:
@@ -776,6 +784,7 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(False)
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
+            self.determine_bond_order.blockSignals(False)
 
         self.save_settings()
         self._reset_camera_on_next_render = True
@@ -991,11 +1000,14 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(True)
             self.radio_mol.blockSignals(True)
             self.radio_pack.blockSignals(True)
+            self.determine_bond_order.blockSignals(True)
 
             self._set_current_view_mode("Whole Molecule")
 
             if "show_bonds" in data:
                 self.show_bonds.setChecked(bool(data["show_bonds"]))
+            if "determine_bond_order" in data:
+                self.determine_bond_order.setChecked(bool(data["determine_bond_order"]))
             if "show_hydrogens" in data:
                 self.show_hydrogens.setChecked(bool(data["show_hydrogens"]))
             if "keep_connected" in data:
@@ -1068,6 +1080,7 @@ class CifViewerWidget(QWidget):
             self.radio_asym.blockSignals(False)
             self.radio_mol.blockSignals(False)
             self.radio_pack.blockSignals(False)
+            self.determine_bond_order.blockSignals(False)
 
     def save_settings(self, *args):
         path = self._settings_path()
@@ -1075,6 +1088,7 @@ class CifViewerWidget(QWidget):
 
         data = {
             "show_bonds": self.show_bonds.isChecked(),
+            "determine_bond_order": self.determine_bond_order.isChecked(),
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
             "show_cell": self.show_cell.isChecked(),
@@ -1274,7 +1288,7 @@ class CifViewerWidget(QWidget):
         mol_bonds = bonds if self.show_bonds.isChecked() else []
         self.last_rendered_atoms = atoms
         try:
-            determine_bo = len(atoms) <= 300
+            determine_bo = self.determine_bond_order.isChecked() and (len(atoms) <= 300)
             mol = render_atoms_to_rdkit_mol(
                 atoms, mol_bonds, determine_bond_order=determine_bo
             )
@@ -1319,11 +1333,14 @@ class CifViewerWidget(QWidget):
             )
             draw_overlays_and_render()
 
-        self.summary_label.setText(
+        summary_text = (
             f"{len(self.structure.atoms)} completed unit-cell atoms, "
             f"{len(atoms)} rendered atoms, {len(bonds)} inferred bonds, "
             f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
         )
+        if self.determine_bond_order.isChecked() and len(atoms) > 300:
+            summary_text += " (Bond order determination skipped: over 300 atoms limit)"
+        self.summary_label.setText(summary_text)
         if self.context and hasattr(self.context, "show_status_message"):
             self.context.show_status_message(
                 "CIF Viewer rendered with MoleditPy 3D style.", 3000
