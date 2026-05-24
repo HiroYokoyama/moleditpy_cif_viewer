@@ -106,6 +106,7 @@ class RenderAtom:
     disorder_group: Optional[str] = None
     disorder_assembly: Optional[str] = None
     is_original_asym: bool = False
+    u_cart: Optional[np.ndarray] = None
 
     @property
     def disorder_key(self) -> Optional[str]:
@@ -916,6 +917,10 @@ def expand_supercell(
                 offset = np.array([ia, ib, ic], dtype=float)
                 cart_offset = offset @ structure.lattice
                 for base_index, atom in enumerate(base_atoms):
+                    u_cart_atom = None
+                    if structure.u_cart is not None and base_index < len(structure.u_cart):
+                        u_cart_atom = structure.u_cart[base_index]
+
                     atoms.append(
                         RenderAtom(
                             label=atom.label,
@@ -925,6 +930,7 @@ def expand_supercell(
                             position=atom.cart + cart_offset,
                             disorder_group=atom.disorder_group,
                             disorder_assembly=atom.disorder_assembly,
+                            u_cart=u_cart_atom,
                         )
                     )
 
@@ -1105,6 +1111,24 @@ def grow_molecules(
                 except Exception as ex:
                     logging.debug("Symmetry operation test point check failed: %s", ex)
 
+            # Get original U_cart for this base_index
+            u_cart_orig = None
+            if structure.u_cart is not None and base_index < len(structure.u_cart):
+                u_cart_orig = structure.u_cart[base_index]
+
+            # Compute rotated U_cart using the symmetry operation rotation matrix
+            u_cart_site = None
+            if u_cart_orig is not None and not np.allclose(u_cart_orig, 0.0):
+                try:
+                    A = structure.lattice.T
+                    A_inv = np.linalg.inv(A)
+                    R = op.rotation_matrix
+                    R_cart = A @ R @ A_inv
+                    u_cart_site = R_cart @ u_cart_orig @ R_cart.T
+                except Exception as exc:
+                    logging.debug("Failed to rotate U_cart: %s", exc)
+                    u_cart_site = u_cart_orig
+
             frac_sym = op.operate(atom.fract)
 
             for tx in (-1, 0, 1):
@@ -1127,6 +1151,7 @@ def grow_molecules(
                                 disorder_group=atom.disorder_group,
                                 disorder_assembly=atom.disorder_assembly,
                                 is_original_asym=is_original_asym,
+                                u_cart=u_cart_site,
                             )
                         )
 

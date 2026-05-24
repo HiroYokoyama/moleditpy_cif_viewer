@@ -709,3 +709,60 @@ def test_infer_bonds_fallback(monkeypatch):
     ]
     bonds = infer_bonds(atoms)
     assert len(bonds) == 1
+
+
+def test_grow_molecules_rotates_adp():
+    import tempfile
+    import os
+    from cif_viewer.parser import grow_molecules, parse_cif_file_pymatgen
+    cif = """
+data_adp_rot
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 2'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.0 0.0
+C2 C 0.1 0.25 0.0
+
+loop_
+_atom_site_aniso_label
+_atom_site_aniso_U_11
+_atom_site_aniso_U_22
+_atom_site_aniso_U_33
+_atom_site_aniso_U_23
+_atom_site_aniso_U_13
+_atom_site_aniso_U_12
+C1 0.05 0.02 0.03 0.005 0.006 0.007
+C2 0.05 0.02 0.03 0.005 0.006 0.007
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".cif", delete=False) as f:
+        f.write(cif)
+        temp_path = f.name
+        
+    try:
+        structures = parse_cif_file_pymatgen(temp_path)
+        struct = structures[0]
+        assert struct.u_cart is not None
+        
+        atoms, bonds = grow_molecules(struct)
+        
+        found_rotated = False
+        for atom in atoms:
+            assert atom.u_cart is not None
+            if np.allclose(atom.u_cart[0, 1], -0.007, atol=1e-5):
+                np.testing.assert_allclose(atom.u_cart[1, 2], -0.005, atol=1e-5)
+                found_rotated = True
+                
+        assert found_rotated, "Symmetry-rotated ellipsoid was not generated or not correctly rotated"
+    finally:
+        os.remove(temp_path)
+

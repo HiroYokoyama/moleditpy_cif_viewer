@@ -1,7 +1,7 @@
 import logging
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.6.0"
+PLUGIN_VERSION = "0.7.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -333,8 +333,8 @@ def initialize(context):
             symbol = atom.element
 
             base_idx = atom.base_index
-            cov = None
-            if base_idx < len(widget.structure.u_cart):
+            cov = getattr(atom, "u_cart", None)
+            if cov is None and widget.structure.u_cart is not None and base_idx < len(widget.structure.u_cart):
                 cov = widget.structure.u_cart[base_idx]
 
             has_cov = cov is not None and not np.allclose(cov, 0.0)
