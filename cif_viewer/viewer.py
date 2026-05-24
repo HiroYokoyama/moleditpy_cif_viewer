@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 import numpy as np
+from PyQt6 import sip  # pylint: disable=c-extension-no-member
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
@@ -1674,13 +1675,8 @@ class CifViewerWidget(QWidget):
             return
 
         def draw_overlays_and_render():
-            try:
-                from PyQt6 import sip
-
-                if sip.isdeleted(self):
-                    return
-            except ImportError:
-                pass
+            if sip.isdeleted(self):
+                return
 
             try:
                 plotter = self._plotter()
@@ -1757,7 +1753,7 @@ class CifViewerWidget(QWidget):
                     )
             main_window.draw_molecule_3d(mol)
 
-    def _draw_cell_overlay(self, plotter, repeats):
+    def _draw_cell_overlay(self, plotter, _repeats):
         lattice = np.asarray(self.structure.lattice, dtype=float)
         color_a = self.color_axis_a.property("color_hex")
         color_b = self.color_axis_b.property("color_hex")
@@ -1765,7 +1761,7 @@ class CifViewerWidget(QWidget):
         color_edges = self.color_cell_edges.property("color_hex")
         color_ori = self.color_origin.property("color_hex")
 
-        for index, (start, end, default_color, label) in enumerate(
+        for index, (start, end, _, label) in enumerate(
             celleditpy_cell_axis_segments(lattice)
         ):
             name = f"cif_viewer_cell_line_{index}"
