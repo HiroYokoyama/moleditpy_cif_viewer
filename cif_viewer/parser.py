@@ -1206,9 +1206,10 @@ def grow_molecules(
                 )
             )
         for li, (i, _) in enumerate(mol):
-            for nb, _ in adj[i]:
+            for nb, shift in adj[i]:
                 if nb in local and li < local[nb]:
-                    final_bonds.append((atom_base + li, atom_base + local[nb]))
+                    if np.all(offsets[nb] - offsets[i] == shift):
+                        final_bonds.append((atom_base + li, atom_base + local[nb]))
         atom_base += len(mol)
 
     return final_atoms, final_bonds

@@ -704,6 +704,8 @@ C2 C 0.8 0.5 0.5
 
     # The polymer is detected, triggering the fallback 1x1x1 supercell representation.
     assert len(atoms) == 2
+    # Verify that only a single bond is formed, rather than duplicate/periodic loop bonds between the same two atoms
+    assert len(bonds) == 1
 
 
 def test_infer_bonds_fallback(monkeypatch):
