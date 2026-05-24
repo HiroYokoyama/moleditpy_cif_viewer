@@ -326,8 +326,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
 
     # Suppress pymatgen/monty UserWarning emitted when a CIF uses a
     # non-standard Hermann-Mauguin symbol (e.g. 'I1a1') that is not in
-    # pymatgen's full-symbol database.  The warning is cosmetic; pymatgen
-    # falls back to the short symbol automatically and parsing continues.
+    # pymatgen's full-symbol database.  The SpaceGroup singleton is created
+    # lazily inside CifParser, _get_structure, get_symops, and
+    # SpacegroupAnalyzer — so the filter must cover the entire function.
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -335,338 +336,341 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
             category=UserWarning,
             module="monty",
         )
+
         parser = CifParser(path)
+        structures = []
 
-    structures = []
-
-    for name, block in parser._cif.data.items():
-        try:
-            struct = parser._get_structure(block, primitive=False, symmetrized=False)
-            if struct is None:
-                continue
-
-            block_data_lower = {k.lower(): v for k, v in block.data.items()}
-
-            # Get spacegroup symmetry operations
-            symops = []
+        for name, block in parser._cif.data.items():
             try:
-                symops = parser.get_symops(block)
-            except Exception as exc:
-                logging.debug("pymatgen get_symops failed: %s", exc)
-            if not symops:
+                struct = parser._get_structure(block, primitive=False, symmetrized=False)
+                if struct is None:
+                    continue
+
+                block_data_lower = {k.lower(): v for k, v in block.data.items()}
+
+                # Get spacegroup symmetry operations
+                symops = []
                 try:
-                    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-
-                    sga = SpacegroupAnalyzer(struct)
-                    symops = sga.get_space_group_operations()
+                    symops = parser.get_symops(block)
                 except Exception as exc:
-                    logging.debug(
-                        "SpacegroupAnalyzer get_space_group_operations failed: %s", exc
-                    )
+                    logging.debug("pymatgen get_symops failed: %s", exc)
+                if not symops:
+                    try:
+                        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-            label_to_adp = {}
-            if "_atom_site_aniso_label" in block_data_lower:
-                aniso_loop = None
-                for loop in block.loops:
-                    if any("aniso" in c.lower() for c in loop):
-                        aniso_loop = loop
-                        break
+                        sga = SpacegroupAnalyzer(struct)
+                        symops = sga.get_space_group_operations()
+                    except Exception as exc:
+                        logging.debug(
+                            "SpacegroupAnalyzer get_space_group_operations failed: %s", exc
+                        )
 
-                if aniso_loop:
-                    label_col = None
-                    val_cols = {}
-                    is_b = False
-                    for col in aniso_loop:
-                        c_low = col.lower()
-                        if "label" in c_low:
-                            label_col = col
-                        for suffix in ["11", "22", "33", "12", "13", "23"]:
-                            if c_low.endswith("u_" + suffix):
-                                val_cols[suffix] = col
-                            elif c_low.endswith("b_" + suffix):
-                                val_cols[suffix] = col
-                                is_b = True
+                label_to_adp = {}
+                if "_atom_site_aniso_label" in block_data_lower:
+                    aniso_loop = None
+                    for loop in block.loops:
+                        if any("aniso" in c.lower() for c in loop):
+                            aniso_loop = loop
+                            break
 
-                    if label_col and "11" in val_cols:
-                        labels_list = block_data_lower[label_col.lower()]
-                        num_entries = len(labels_list)
+                    if aniso_loop:
+                        label_col = None
+                        val_cols = {}
+                        is_b = False
+                        for col in aniso_loop:
+                            c_low = col.lower()
+                            if "label" in c_low:
+                                label_col = col
+                            for suffix in ["11", "22", "33", "12", "13", "23"]:
+                                if c_low.endswith("u_" + suffix):
+                                    val_cols[suffix] = col
+                                elif c_low.endswith("b_" + suffix):
+                                    val_cols[suffix] = col
+                                    is_b = True
 
-                        for i in range(num_entries):
-                            lbl = labels_list[i]
+                        if label_col and "11" in val_cols:
+                            labels_list = block_data_lower[label_col.lower()]
+                            num_entries = len(labels_list)
+
+                            for i in range(num_entries):
+                                lbl = labels_list[i]
+                                try:
+                                    u_vals = {}
+                                    for suffix in ["11", "22", "33", "12", "13", "23"]:
+                                        col = val_cols.get(suffix)
+                                        val = 0.0
+                                        if col and i < len(block_data_lower[col.lower()]):
+                                            val = parse_cif_number(
+                                                block_data_lower[col.lower()][i]
+                                            )
+                                            if is_b:
+                                                val = val / (8.0 * math.pi * math.pi)
+                                        u_vals[suffix] = val
+
+                                    phonopy_order = [
+                                        u_vals.get("11", 0.0),
+                                        u_vals.get("22", 0.0),
+                                        u_vals.get("33", 0.0),
+                                        u_vals.get("23", 0.0),
+                                        u_vals.get("13", 0.0),
+                                        u_vals.get("12", 0.0),
+                                    ]
+                                    label_to_adp[lbl] = phonopy_order
+                                except Exception as exc:
+                                    logging.debug(
+                                        "Failed parsing ADP parameters for label %s: %s",
+                                        lbl,
+                                        exc,
+                                    )
+
+                u_cart_data = None
+                if label_to_adp:
+                    A = struct.lattice.matrix.T
+                    A_inv = np.linalg.inv(A)
+                    N = np.diag([np.linalg.norm(x) for x in A_inv])
+
+                    # Build mapping of clean labels to their original asymmetric unit fractional coordinates
+                    label_to_frac_orig = {}
+                    if "_atom_site_label" in block_data_lower:
+                        labels = block_data_lower["_atom_site_label"]
+                        fx = block_data_lower.get("_atom_site_fract_x", [])
+                        fy = block_data_lower.get("_atom_site_fract_y", [])
+                        fz = block_data_lower.get("_atom_site_fract_z", [])
+                        for idx_lbl, lbl in enumerate(labels):
                             try:
-                                u_vals = {}
-                                for suffix in ["11", "22", "33", "12", "13", "23"]:
-                                    col = val_cols.get(suffix)
-                                    val = 0.0
-                                    if col and i < len(block_data_lower[col.lower()]):
-                                        val = parse_cif_number(
-                                            block_data_lower[col.lower()][i]
-                                        )
-                                        if is_b:
-                                            val = val / (8.0 * math.pi * math.pi)
-                                    u_vals[suffix] = val
-
-                                phonopy_order = [
-                                    u_vals.get("11", 0.0),
-                                    u_vals.get("22", 0.0),
-                                    u_vals.get("33", 0.0),
-                                    u_vals.get("23", 0.0),
-                                    u_vals.get("13", 0.0),
-                                    u_vals.get("12", 0.0),
-                                ]
-                                label_to_adp[lbl] = phonopy_order
+                                clean_lbl = str(lbl).strip().strip("'\"")
+                                x = parse_cif_number(fx[idx_lbl])
+                                y = parse_cif_number(fy[idx_lbl])
+                                z = parse_cif_number(fz[idx_lbl])
+                                label_to_frac_orig[clean_lbl] = np.array([x, y, z])
                             except Exception as exc:
                                 logging.debug(
-                                    "Failed parsing ADP parameters for label %s: %s",
-                                    lbl,
+                                    "Failed parsing fractional coordinates for label %s: %s",
+                                    clean_lbl,
                                     exc,
                                 )
 
-            u_cart_data = None
-            if label_to_adp:
-                A = struct.lattice.matrix.T
-                A_inv = np.linalg.inv(A)
-                N = np.diag([np.linalg.norm(x) for x in A_inv])
+                    u_cart_list = []
+                    for site in struct:
+                        lbl = str(getattr(site, "label", "")).strip().strip("'\"")
+                        if lbl in label_to_adp:
+                            u_orig_vals = list(label_to_adp[lbl])
+                            frac_orig = label_to_frac_orig.get(lbl)
 
-                # Build mapping of clean labels to their original asymmetric unit fractional coordinates
-                label_to_frac_orig = {}
-                if "_atom_site_label" in block_data_lower:
-                    labels = block_data_lower["_atom_site_label"]
-                    fx = block_data_lower.get("_atom_site_fract_x", [])
-                    fy = block_data_lower.get("_atom_site_fract_y", [])
-                    fz = block_data_lower.get("_atom_site_fract_z", [])
+                            u11, u22, u33, u23, u13, u12 = u_orig_vals
+                            U_frac_orig = np.array(
+                                [[u11, u12, u13], [u12, u22, u23], [u13, u23, u33]],
+                                dtype=float,
+                            )
+
+                            # Convert original U_frac to Cartesian U_cart
+                            mat_ustar = N @ U_frac_orig @ N
+                            U_cart_orig = A @ mat_ustar @ A.T
+
+                            if frac_orig is not None and symops:
+                                frac_site = site.frac_coords
+                                matched_op = None
+                                for op in symops:
+                                    res = op.operate(frac_orig)
+                                    diff = res - frac_site
+                                    diff_mod = diff - np.round(diff)
+                                    if np.allclose(diff_mod, 0.0, atol=1e-4):
+                                        matched_op = op
+                                        break
+
+                                if matched_op is not None:
+                                    R = matched_op.rotation_matrix
+                                    R_cart = A @ R @ A_inv
+                                    U_cart_site = R_cart @ U_cart_orig @ R_cart.T
+                                else:
+                                    U_cart_site = U_cart_orig
+                            else:
+                                U_cart_site = U_cart_orig
+                            u_cart_list.append(U_cart_site)
+                        else:
+                            u_cart_list.append(np.zeros((3, 3)))
+
+                    if u_cart_list and any(not np.allclose(m, 0.0) for m in u_cart_list):
+                        u_cart_data = np.array(u_cart_list, dtype=float)
+
+                # Build label_to_disorder map
+                label_to_disorder = {}
+                label_key = None
+                group_key = None
+                assembly_key = None
+                for k in block_data_lower.keys():
+                    k_norm = k.lower().lstrip("_")
+                    if k_norm == "atom_site_label":
+                        label_key = k
+                    elif k_norm == "atom_site_disorder_group":
+                        group_key = k
+                    elif k_norm == "atom_site_disorder_assembly":
+                        assembly_key = k
+
+                if label_key is not None:
+                    labels = block_data_lower[label_key]
+                    groups = block_data_lower[group_key] if group_key is not None else []
+                    assemblies = (
+                        block_data_lower[assembly_key] if assembly_key is not None else []
+                    )
                     for idx_lbl, lbl in enumerate(labels):
                         try:
                             clean_lbl = str(lbl).strip().strip("'\"")
-                            x = parse_cif_number(fx[idx_lbl])
-                            y = parse_cif_number(fy[idx_lbl])
-                            z = parse_cif_number(fz[idx_lbl])
-                            label_to_frac_orig[clean_lbl] = np.array([x, y, z])
+                            g = (
+                                str(groups[idx_lbl]).strip().strip("'\"")
+                                if idx_lbl < len(groups)
+                                else None
+                            )
+                            a = (
+                                str(assemblies[idx_lbl]).strip().strip("'\"")
+                                if idx_lbl < len(assemblies)
+                                else None
+                            )
+                            if g in {".", "?", ""}:
+                                g = None
+                            if a in {".", "?", ""}:
+                                a = None
+                            label_to_disorder[clean_lbl] = (g, a)
                         except Exception as exc:
                             logging.debug(
-                                "Failed parsing fractional coordinates for label %s: %s",
-                                clean_lbl,
-                                exc,
+                                "Failed to parse disorder info for label %s: %s", lbl, exc
                             )
 
-                u_cart_list = []
-                for site in struct:
-                    lbl = str(getattr(site, "label", "")).strip().strip("'\"")
-                    if lbl in label_to_adp:
-                        u_orig_vals = list(label_to_adp[lbl])
-                        frac_orig = label_to_frac_orig.get(lbl)
-
-                        u11, u22, u33, u23, u13, u12 = u_orig_vals
-                        U_frac_orig = np.array(
-                            [[u11, u12, u13], [u12, u22, u23], [u13, u23, u33]],
-                            dtype=float,
-                        )
-
-                        # Convert original U_frac to Cartesian U_cart
-                        mat_ustar = N @ U_frac_orig @ N
-                        U_cart_orig = A @ mat_ustar @ A.T
-
-                        if frac_orig is not None and symops:
-                            frac_site = site.frac_coords
-                            matched_op = None
-                            for op in symops:
-                                res = op.operate(frac_orig)
-                                diff = res - frac_site
-                                diff_mod = diff - np.round(diff)
-                                if np.allclose(diff_mod, 0.0, atol=1e-4):
-                                    matched_op = op
-                                    break
-
-                            if matched_op is not None:
-                                R = matched_op.rotation_matrix
-                                R_cart = A @ R @ A_inv
-                                U_cart_site = R_cart @ U_cart_orig @ R_cart.T
-                            else:
-                                U_cart_site = U_cart_orig
-                        else:
-                            U_cart_site = U_cart_orig
-                        u_cart_list.append(U_cart_site)
-                    else:
-                        u_cart_list.append(np.zeros((3, 3)))
-
-                if u_cart_list and any(not np.allclose(m, 0.0) for m in u_cart_list):
-                    u_cart_data = np.array(u_cart_list, dtype=float)
-
-            # Build label_to_disorder map
-            label_to_disorder = {}
-            label_key = None
-            group_key = None
-            assembly_key = None
-            for k in block_data_lower.keys():
-                k_norm = k.lower().lstrip("_")
-                if k_norm == "atom_site_label":
-                    label_key = k
-                elif k_norm == "atom_site_disorder_group":
-                    group_key = k
-                elif k_norm == "atom_site_disorder_assembly":
-                    assembly_key = k
-
-            if label_key is not None:
-                labels = block_data_lower[label_key]
-                groups = block_data_lower[group_key] if group_key is not None else []
-                assemblies = (
-                    block_data_lower[assembly_key] if assembly_key is not None else []
+                # Extract cell metadata and refinement factors
+                space_group = _get_first_tag_value(
+                    block_data_lower,
+                    [
+                        "_space_group_name_h-m_alt",
+                        "_symmetry_space_group_name_h-m",
+                        "_space_group.symmetry_space_group_name_h-m",
+                    ],
                 )
-                for idx_lbl, lbl in enumerate(labels):
+                if not space_group:
                     try:
-                        clean_lbl = str(lbl).strip().strip("'\"")
-                        g = (
-                            str(groups[idx_lbl]).strip().strip("'\"")
-                            if idx_lbl < len(groups)
-                            else None
-                        )
-                        a = (
-                            str(assemblies[idx_lbl]).strip().strip("'\"")
-                            if idx_lbl < len(assemblies)
-                            else None
-                        )
-                        if g in {".", "?", ""}:
-                            g = None
-                        if a in {".", "?", ""}:
-                            a = None
-                        label_to_disorder[clean_lbl] = (g, a)
+                        space_group = struct.get_space_group_info()[0]
                     except Exception as exc:
                         logging.debug(
-                            "Failed to parse disorder info for label %s: %s", lbl, exc
+                            "Failed to get space group info from structure: %s", exc
                         )
 
-            # Extract cell metadata and refinement factors
-            space_group = _get_first_tag_value(
-                block_data_lower,
-                [
-                    "_space_group_name_h-m_alt",
-                    "_symmetry_space_group_name_h-m",
-                    "_space_group.symmetry_space_group_name_h-m",
-                ],
-            )
-            if not space_group:
-                try:
-                    space_group = struct.get_space_group_info()[0]
-                except Exception as exc:
-                    logging.debug(
-                        "Failed to get space group info from structure: %s", exc
-                    )
+                space_group_number = _get_first_tag_value(
+                    block_data_lower,
+                    [
+                        "_space_group_it_number",
+                        "_space_group.it_number",
+                        "_symmetry_int_tables_number",
+                        "_symmetry.int_tables_number",
+                    ],
+                )
+                if not space_group_number:
+                    try:
+                        space_group_number = str(struct.get_space_group_info()[1])
+                    except Exception as exc:
+                        logging.debug(
+                            "Failed to get space group number info from structure: %s", exc
+                        )
+                if not space_group_number:
+                    try:
+                        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-            space_group_number = _get_first_tag_value(
-                block_data_lower,
-                [
-                    "_space_group_it_number",
-                    "_space_group.it_number",
-                    "_symmetry_int_tables_number",
-                    "_symmetry.int_tables_number",
-                ],
-            )
-            if not space_group_number:
-                try:
-                    space_group_number = str(struct.get_space_group_info()[1])
-                except Exception as exc:
-                    logging.debug(
-                        "Failed to get space group number info from structure: %s", exc
-                    )
-            if not space_group_number:
-                try:
-                    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                        sga = SpacegroupAnalyzer(struct)
+                        space_group_number = str(sga.get_space_group_number())
+                    except Exception as exc:
+                        logging.debug(
+                            "SpacegroupAnalyzer get_space_group_number failed: %s", exc
+                        )
 
-                    sga = SpacegroupAnalyzer(struct)
-                    space_group_number = str(sga.get_space_group_number())
-                except Exception as exc:
-                    logging.debug(
-                        "SpacegroupAnalyzer get_space_group_number failed: %s", exc
-                    )
+                crystal_system = _get_first_tag_value(
+                    block_data_lower,
+                    ["_space_group_crystal_system", "_symmetry_cell_setting"],
+                )
+                if not crystal_system:
+                    try:
+                        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-            crystal_system = _get_first_tag_value(
-                block_data_lower,
-                ["_space_group_crystal_system", "_symmetry_cell_setting"],
-            )
-            if not crystal_system:
-                try:
-                    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                        sga = SpacegroupAnalyzer(struct)
+                        crystal_system = sga.get_crystal_system()
+                    except Exception as exc:
+                        logging.debug(
+                            "SpacegroupAnalyzer get_crystal_system failed: %s", exc
+                        )
 
-                    sga = SpacegroupAnalyzer(struct)
-                    crystal_system = sga.get_crystal_system()
-                except Exception as exc:
-                    logging.debug(
-                        "SpacegroupAnalyzer get_crystal_system failed: %s", exc
-                    )
+                formula = _get_first_tag_value(
+                    block_data_lower,
+                    [
+                        "_chemical_formula_sum",
+                        "_chemical_formula_structural",
+                        "_chemical_formula_moiety",
+                    ],
+                )
+                if not formula:
+                    try:
+                        formula = struct.formula
+                    except Exception as exc:
+                        logging.debug("Failed to get formula from structure: %s", exc)
 
-            formula = _get_first_tag_value(
-                block_data_lower,
-                [
-                    "_chemical_formula_sum",
-                    "_chemical_formula_structural",
-                    "_chemical_formula_moiety",
-                ],
-            )
-            if not formula:
-                try:
-                    formula = struct.formula
-                except Exception as exc:
-                    logging.debug("Failed to get formula from structure: %s", exc)
+                r1 = _get_first_tag_value(
+                    block_data_lower,
+                    [
+                        "_refine_ls_r_factor_gt",
+                        "_refine_ls_r_factor_obs",
+                        "_refine_ls_r_factor_all",
+                    ],
+                )
+                wr2 = _get_first_tag_value(
+                    block_data_lower,
+                    [
+                        "_refine_ls_wr_factor_ref",
+                        "_refine_ls_wr_factor_gt",
+                        "_refine_ls_wr_factor_all",
+                    ],
+                )
+                goof = _get_first_tag_value(
+                    block_data_lower,
+                    ["_refine_ls_goodness_of_fit_ref", "_refine_ls_goodness_of_fit_all"],
+                )
 
-            r1 = _get_first_tag_value(
-                block_data_lower,
-                [
-                    "_refine_ls_r_factor_gt",
-                    "_refine_ls_r_factor_obs",
-                    "_refine_ls_r_factor_all",
-                ],
-            )
-            wr2 = _get_first_tag_value(
-                block_data_lower,
-                [
-                    "_refine_ls_wr_factor_ref",
-                    "_refine_ls_wr_factor_gt",
-                    "_refine_ls_wr_factor_all",
-                ],
-            )
-            goof = _get_first_tag_value(
-                block_data_lower,
-                ["_refine_ls_goodness_of_fit_ref", "_refine_ls_goodness_of_fit_all"],
-            )
+                num_symops = (
+                    len(symops)
+                    if symops
+                    else _count_symops_from_block_data(block_data_lower)
+                )
+                if num_symops == 0:
+                    num_symops = None
 
-            num_symops = (
-                len(symops)
-                if symops
-                else _count_symops_from_block_data(block_data_lower)
-            )
-            if num_symops == 0:
-                num_symops = None
+                metadata = _extract_metadata(
+                    lambda keys: _get_first_tag_value(block_data_lower, keys),
+                    num_symops=num_symops,
+                )
 
-            metadata = _extract_metadata(
-                lambda keys: _get_first_tag_value(block_data_lower, keys),
-                num_symops=num_symops,
-            )
+                asym_atoms = _parse_asymmetric_atoms(
+                    block_data_lower, struct.lattice.matrix, label_to_disorder
+                )
 
-            asym_atoms = _parse_asymmetric_atoms(
-                block_data_lower, struct.lattice.matrix, label_to_disorder
-            )
+                cif_struct = _structure_from_pymatgen(
+                    struct,
+                    name or "Structure",
+                    u_cart_data,
+                    label_to_disorder=label_to_disorder,
+                    space_group=space_group,
+                    space_group_number=space_group_number,
+                    crystal_system=crystal_system,
+                    formula=formula,
+                    r1=r1,
+                    wr2=wr2,
+                    goof=goof,
+                    asymmetric_atoms=tuple(asym_atoms) if asym_atoms else None,
+                    **metadata,
+                )
 
-            cif_struct = _structure_from_pymatgen(
-                struct,
-                name or "Structure",
-                u_cart_data,
-                label_to_disorder=label_to_disorder,
-                space_group=space_group,
-                space_group_number=space_group_number,
-                crystal_system=crystal_system,
-                formula=formula,
-                r1=r1,
-                wr2=wr2,
-                goof=goof,
-                asymmetric_atoms=tuple(asym_atoms) if asym_atoms else None,
-                **metadata,
-            )
+                structures.append(cif_struct)
+            except Exception as exc:
+                logging.error("Failed to parse structure block %s: %s", name, exc)
 
-            structures.append(cif_struct)
-        except Exception as exc:
-            logging.error("Failed to parse structure block %s: %s", name, exc)
+        return structures
 
-    return structures
+
+
 
 
 def _structure_from_pymatgen(
