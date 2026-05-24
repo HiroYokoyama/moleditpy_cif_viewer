@@ -918,7 +918,9 @@ def expand_supercell(
                 cart_offset = offset @ structure.lattice
                 for base_index, atom in enumerate(base_atoms):
                     u_cart_atom = None
-                    if structure.u_cart is not None and base_index < len(structure.u_cart):
+                    if structure.u_cart is not None and base_index < len(
+                        structure.u_cart
+                    ):
                         u_cart_atom = structure.u_cart[base_index]
 
                     atoms.append(
@@ -1078,7 +1080,7 @@ def grow_molecules(
     core_atoms = unwrap_connected_atoms(structure)
 
     symops = get_space_group_operations(structure)
-    if not symops:
+    if not symops or not structure.is_asymmetric_unit_only:
         from pymatgen.core.operations import SymmOp
 
         symops = [SymmOp.from_xyz_str("x, y, z")]

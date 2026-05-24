@@ -334,7 +334,11 @@ def initialize(context):
 
             base_idx = atom.base_index
             cov = getattr(atom, "u_cart", None)
-            if cov is None and widget.structure.u_cart is not None and base_idx < len(widget.structure.u_cart):
+            if (
+                cov is None
+                and widget.structure.u_cart is not None
+                and base_idx < len(widget.structure.u_cart)
+            ):
                 cov = widget.structure.u_cart[base_idx]
 
             has_cov = cov is not None and not np.allclose(cov, 0.0)
