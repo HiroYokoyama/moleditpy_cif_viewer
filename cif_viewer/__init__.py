@@ -645,6 +645,12 @@ def initialize(context):
 
             apply_camera()
 
+            if widget is not None and hasattr(widget, "render_overlays_only"):
+                try:
+                    widget.render_overlays_only()
+                except Exception as e:
+                    logging.debug("Failed to call render_overlays_only: %s", e)
+
             is_testing = "PYTEST_CURRENT_TEST" in os.environ
             if is_testing:
                 render_axes()
