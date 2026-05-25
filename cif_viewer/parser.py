@@ -1004,7 +1004,18 @@ def get_space_group_operations(structure: CifStructure) -> list:
 
 
 def _infer_periodic_adjacency(structure: CifStructure):
+    import math
+
     adjacency = {atom_index: [] for atom_index in range(len(structure.atoms))}
+    lattice = structure.lattice
+
+    # Precompute 27 shifts in 3x3x3 grid around the minimum image shift
+    grid_shifts = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                grid_shifts.append(np.array([dx, dy, dz], dtype=int))
+
     for left_index in range(len(structure.atoms)):
         left_atom = structure.atoms[left_index]
         left_radius = covalent_radius(left_atom.element)
@@ -1023,32 +1034,68 @@ def _infer_periodic_adjacency(structure: CifStructure):
 
             delta_frac = np.asarray(right_atom.fract) - np.asarray(left_atom.fract)
 
+            # Minimum image distance check first to fast-prune far-apart atom pairs
+            min_image_delta = delta_frac - np.round(delta_frac)
+            mdx = (
+                min_image_delta[0] * lattice[0, 0]
+                + min_image_delta[1] * lattice[1, 0]
+                + min_image_delta[2] * lattice[2, 0]
+            )
+            mdy = (
+                min_image_delta[0] * lattice[0, 1]
+                + min_image_delta[1] * lattice[1, 1]
+                + min_image_delta[2] * lattice[2, 1]
+            )
+            mdz = (
+                min_image_delta[0] * lattice[0, 2]
+                + min_image_delta[1] * lattice[1, 2]
+                + min_image_delta[2] * lattice[2, 2]
+            )
+            min_image_dist = math.sqrt(mdx * mdx + mdy * mdy + mdz * mdz)
+
+            if min_image_dist > cutoff:
+                continue
+
             # Find the minimum image shift as the baseline to support un-normalized coordinates
             base_shift = -np.rint(delta_frac).astype(int)
 
             # Sweep a 3x3x3 grid around the minimum image to catch multi-path boundary bonds
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        shift = base_shift + np.array([dx, dy, dz], dtype=int)
+            for grid_shift in grid_shifts:
+                shift = base_shift + grid_shift
 
-                        # Skip self-comparison at zero net shift
-                        if left_index == right_index and np.all(shift == 0):
-                            continue
+                # Skip self-comparison at zero net shift
+                if (
+                    left_index == right_index
+                    and shift[0] == 0
+                    and shift[1] == 0
+                    and shift[2] == 0
+                ):
+                    continue
 
-                        shifted_delta = delta_frac + shift
-                        distance = float(
-                            np.linalg.norm(
-                                fractional_to_cartesian(
-                                    shifted_delta, structure.lattice
-                                )
-                            )
-                        )
+                shifted_delta = delta_frac + shift
 
-                        if 0.25 <= distance <= cutoff:
-                            adjacency[left_index].append((right_index, shift))
-                            if left_index != right_index:
-                                adjacency[right_index].append((left_index, -shift))
+                # Fast pure-Python fractional to cartesian & norm computation
+                dx = (
+                    shifted_delta[0] * lattice[0, 0]
+                    + shifted_delta[1] * lattice[1, 0]
+                    + shifted_delta[2] * lattice[2, 0]
+                )
+                dy = (
+                    shifted_delta[0] * lattice[0, 1]
+                    + shifted_delta[1] * lattice[1, 1]
+                    + shifted_delta[2] * lattice[2, 1]
+                )
+                dz = (
+                    shifted_delta[0] * lattice[0, 2]
+                    + shifted_delta[1] * lattice[1, 2]
+                    + shifted_delta[2] * lattice[2, 2]
+                )
+                distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+                if 0.25 <= distance <= cutoff:
+                    adjacency[left_index].append((right_index, shift))
+                    if left_index != right_index:
+                        adjacency[right_index].append((left_index, -shift))
 
     return adjacency
 
@@ -1122,12 +1169,26 @@ def grow_molecules(
 
             frac = op.operate(atom.fract) % 1.0
 
-            # deduplicate
-            dup = any(
-                np.linalg.norm((frac - p - np.round(frac - p)) @ structure.lattice)
-                < 0.05
-                for p in seen_fracs
-            )
+            # deduplicate via fast pure-Python distance checks
+            dup = False
+            lattice = structure.lattice
+            for p in seen_fracs:
+                df0 = frac[0] - p[0]
+                df1 = frac[1] - p[1]
+                df2 = frac[2] - p[2]
+
+                df0 -= round(df0)
+                df1 -= round(df1)
+                df2 -= round(df2)
+
+                dx = df0 * lattice[0, 0] + df1 * lattice[1, 0] + df2 * lattice[2, 0]
+                dy = df0 * lattice[0, 1] + df1 * lattice[1, 1] + df2 * lattice[2, 1]
+                dz = df0 * lattice[0, 2] + df1 * lattice[1, 2] + df2 * lattice[2, 2]
+
+                if dx * dx + dy * dy + dz * dz < 0.0025:  # 0.05^2
+                    dup = True
+                    break
+
             if dup:
                 continue
             seen_fracs.append(frac.copy())

@@ -4,7 +4,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QProgressDialog
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.8.0"
+PLUGIN_VERSION = "0.9.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
