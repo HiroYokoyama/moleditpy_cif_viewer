@@ -1594,8 +1594,8 @@ class CifViewerWidget(QWidget):
             or "PYTEST_CURRENT_TEST" in os.environ
         )
 
-        if is_headless:
-            # Sync run in headless/pytest so tests block until completed
+        if is_headless or est_atoms <= 100:
+            # Sync run in headless/pytest or when atom count is <= 100 so it runs fast on the main thread without overhead
             try:
                 last_rendered_atoms, bonds, mol = _run_render_calculation(
                     structure_to_render,
@@ -1703,7 +1703,7 @@ class CifViewerWidget(QWidget):
                 logging.error("Failed to reset camera or render cell: %s", exc)
 
         try:
-            QTimer.singleShot(100, self, draw_overlays_and_render)
+            QTimer.singleShot(100, draw_overlays_and_render)
         except Exception as exc:
             logging.warning(
                 "Failed to schedule draw_overlays_and_render with QTimer: %s",
