@@ -1575,7 +1575,16 @@ class CifViewerWidget(QWidget):
         )
 
         # Estimate number of atoms to decide if we show progress dialog
-        est_atoms = len(self.structure.atoms)
+        if view_mode in ("Asymmetric Unit", "Whole Molecule"):
+            base_atoms_count = len(
+                self.structure.asymmetric_atoms
+                if self.structure.asymmetric_atoms is not None
+                else self.structure.atoms
+            )
+        else:
+            base_atoms_count = len(self.structure.atoms)
+
+        est_atoms = base_atoms_count
         if view_mode == "Packing":
             est_atoms *= repeats[0] * repeats[1] * repeats[2]
         elif view_mode == "Whole Molecule":
@@ -1586,7 +1595,9 @@ class CifViewerWidget(QWidget):
                 num_ops = len(symops) if symops else 1
             except Exception:
                 num_ops = 1
-            est_atoms *= num_ops
+            # In Whole Molecule mode, the final molecule size is typically a single molecule.
+            # Multiplier of min(num_ops, 4) provides a realistic estimate of the grown molecule.
+            est_atoms *= min(num_ops, 4)
 
         is_headless = (
             os.environ.get("MOLEDITPY_HEADLESS") == "1"
