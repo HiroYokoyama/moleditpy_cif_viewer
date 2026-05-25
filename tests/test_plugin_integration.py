@@ -2161,3 +2161,45 @@ def test_cif_viewer_widget_render_thread_cancellation(qtbot, monkeypatch):
 
     # Verify widget.last_rendered_atoms was NOT updated
     assert getattr(widget, "last_rendered_atoms", None) is None
+
+
+def test_asymmetric_unit_ignores_repeats(monkeypatch):
+    from cif_viewer.viewer import _run_render_calculation
+    from cif_viewer.parser import CifStructure, CifAtom
+    import numpy as np
+    from rdkit import Chem
+
+    # Mock render_atoms_to_rdkit_mol
+    monkeypatch.setattr(
+        "cif_viewer.viewer.render_atoms_to_rdkit_mol",
+        lambda atoms, bonds, determine_bond_order=False: Chem.Mol(),
+    )
+
+    # 1. Setup a simple structure
+    lattice = np.eye(3) * 10.0
+    atoms = [CifAtom("C1", "C", np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0]))]
+    struct = CifStructure(
+        "simple_struct",
+        (10.0, 10.0, 10.0),
+        (90.0, 90.0, 90.0),
+        lattice,
+        tuple(atoms),
+    )
+
+    # 2. Run render calculation for "Asymmetric Unit" mode with repeats (2, 2, 2)
+    last_rendered, bonds, mol = _run_render_calculation(
+        struct,
+        "Asymmetric Unit",
+        selected_key=None,
+        repeats=(2, 2, 2),
+        keep_connected=True,
+        tolerance=0.45,
+        determine_bo=False,
+        max_atoms=100,
+        show_hydrogens=True,
+        show_bonds=True,
+    )
+
+    # 3. Assert repeats were ignored and it only rendered 1 atom (the 1x1x1 original)
+    assert len(last_rendered) == 1
+    assert last_rendered[0].label == "C1"

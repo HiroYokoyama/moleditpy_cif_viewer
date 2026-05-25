@@ -64,6 +64,13 @@ def _run_render_calculation(
             selected_disorder_key=selected_key,
             tolerance=tolerance,
         )
+    elif view_mode == "Asymmetric Unit":
+        atoms, bonds = expand_supercell(
+            structure_to_render,
+            (1, 1, 1),
+            keep_connected=keep_connected,
+            tolerance=tolerance,
+        )
     else:
         atoms, bonds = expand_supercell(
             structure_to_render,
