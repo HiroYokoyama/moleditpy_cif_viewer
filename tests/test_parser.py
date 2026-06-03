@@ -996,8 +996,46 @@ C2 C 0.9 0.5 0.5
 """
 
 
+_CROSS_BOUNDARY_MOLECULE_CIF = """\
+data_cross_boundary
+_cell_length_a 5.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.5 0.5
+C2 C 0.9 0.5 0.5
+"""
+
+_3D_FRAMEWORK_CIF = """\
+data_3d_framework
+_cell_length_a 1.5
+_cell_length_b 1.5
+_cell_length_c 1.5
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.0 0.0 0.0
+"""
+
+
 def test_is_polymer_structure_detects_polymer():
-    """is_polymer_structure() returns True when any bond crosses a cell boundary."""
+    """is_polymer_structure() returns True when the BFS finds a topological ring crossing the cell."""
     from cif_viewer.parser import is_polymer_structure
 
     struct = parse_cif(_POLYMER_1D_CIF)
@@ -1018,6 +1056,23 @@ def test_is_polymer_structure_returns_false_for_disconnected_ionic():
 
     struct = parse_cif(NACL_CIF)
     assert is_polymer_structure(struct) is False
+
+
+def test_is_polymer_structure_returns_false_for_cross_boundary_molecule():
+    """A discrete molecule that lies across the unit cell boundary has bonds that cross the boundary,
+    but it does not form an infinite topological ring. is_polymer_structure() must return False."""
+    from cif_viewer.parser import is_polymer_structure
+
+    struct = parse_cif(_CROSS_BOUNDARY_MOLECULE_CIF)
+    assert is_polymer_structure(struct) is False
+
+
+def test_is_polymer_structure_detects_3d_framework():
+    """A 3D framework where an atom bonds to its own periodic images must be detected as a polymer."""
+    from cif_viewer.parser import is_polymer_structure
+
+    struct = parse_cif(_3D_FRAMEWORK_CIF)
+    assert is_polymer_structure(struct) is True
 
 
 def test_grow_molecules_polymer_returns_in_cell_atoms():
