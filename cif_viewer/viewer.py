@@ -409,6 +409,13 @@ class CifViewerWidget(QWidget):
         mode_group_layout.addWidget(self.radio_asym)
         mode_group_layout.addWidget(self.radio_pack)
 
+        self.polymer_warning_label = QLabel(
+            "Polymer / framework detected.\n'Whole Molecule' mode disabled."
+        )
+        self.polymer_warning_label.setStyleSheet("color: #d32f2f; font-weight: bold;")
+        self.polymer_warning_label.setVisible(False)
+        mode_group_layout.addWidget(self.polymer_warning_label)
+
         mode_group.setLayout(mode_group_layout)
         struct_layout.addWidget(mode_group)
 
@@ -1458,22 +1465,20 @@ class CifViewerWidget(QWidget):
         self._update_disorder_ui()
         self._update_info_ui()
 
-        # Auto-detect polymer / framework structures and switch mode.
-        # "Whole Molecule" is meaningless for COFs, MOFs, and coordination
-        # polymers because there is no finite molecule to complete; the user
-        # would see a distorted or empty rendering.  Switch to
-        # "Asymmetric Unit" automatically and inform the user once.
-        if self.radio_mol.isChecked() and self.structure is not None:
-            try:
-                if is_polymer_structure(self.structure):
-                    self._set_current_view_mode("Asymmetric Unit")
-                    self.summary_label.setText(
-                        "Polymer / framework detected. Switched to "
-                        '"Asymmetric Unit" mode automatically. '
-                        'Use "Packing" to view more of the crystal.'
-                    )
-            except Exception as exc:
-                logging.debug("is_polymer_structure check failed: %s", exc)
+        # Auto-detect polymer / framework structures and update UI.
+        try:
+            if is_polymer_structure(self.structure):
+                self.polymer_warning_label.setVisible(True)
+                self.radio_mol.setEnabled(False)
+                if self.radio_mol.isChecked():
+                    self.radio_asym.setChecked(True)
+            else:
+                self.polymer_warning_label.setVisible(False)
+                self.radio_mol.setEnabled(True)
+        except Exception as exc:
+            logging.debug("is_polymer_structure check failed: %s", exc)
+            self.polymer_warning_label.setVisible(False)
+            self.radio_mol.setEnabled(True)
 
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
