@@ -1094,8 +1094,27 @@ class CifViewerWidget(QWidget):
             self.structure = self.all_structures[row]
             self._update_disorder_ui()
             self._update_info_ui()
+            self._update_polymer_ui()
             self._reset_camera_on_next_render = True
             self.render()
+
+    def _update_polymer_ui(self):
+        if self.structure is None:
+            return
+
+        try:
+            if is_polymer_structure(self.structure):
+                self.polymer_warning_label.setVisible(True)
+                self.radio_mol.setEnabled(False)
+                if self.radio_mol.isChecked():
+                    self.radio_asym.setChecked(True)
+            else:
+                self.polymer_warning_label.setVisible(False)
+                self.radio_mol.setEnabled(True)
+        except Exception as exc:
+            logging.debug("is_polymer_structure check failed: %s", exc)
+            self.polymer_warning_label.setVisible(False)
+            self.radio_mol.setEnabled(True)
 
     def _update_disorder_ui(self):
         if self.structure is None:
@@ -1465,20 +1484,7 @@ class CifViewerWidget(QWidget):
         self._update_disorder_ui()
         self._update_info_ui()
 
-        # Auto-detect polymer / framework structures and update UI.
-        try:
-            if is_polymer_structure(self.structure):
-                self.polymer_warning_label.setVisible(True)
-                self.radio_mol.setEnabled(False)
-                if self.radio_mol.isChecked():
-                    self.radio_asym.setChecked(True)
-            else:
-                self.polymer_warning_label.setVisible(False)
-                self.radio_mol.setEnabled(True)
-        except Exception as exc:
-            logging.debug("is_polymer_structure check failed: %s", exc)
-            self.polymer_warning_label.setVisible(False)
-            self.radio_mol.setEnabled(True)
+        self._update_polymer_ui()
 
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
