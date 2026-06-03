@@ -1108,13 +1108,19 @@ class CifViewerWidget(QWidget):
                 self.radio_mol.setEnabled(False)
                 if self.radio_mol.isChecked():
                     self.radio_asym.setChecked(True)
+                self._was_polymer = True
             else:
                 self.polymer_warning_label.setVisible(False)
                 self.radio_mol.setEnabled(True)
+                if getattr(self, "_was_polymer", False):
+                    if self.radio_asym.isChecked():
+                        self.radio_mol.setChecked(True)
+                self._was_polymer = False
         except Exception as exc:
             logging.debug("is_polymer_structure check failed: %s", exc)
             self.polymer_warning_label.setVisible(False)
             self.radio_mol.setEnabled(True)
+            self._was_polymer = False
 
     def _update_disorder_ui(self):
         if self.structure is None:
