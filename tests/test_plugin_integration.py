@@ -1932,6 +1932,7 @@ def test_cif_viewer_widget_is_asymmetric_unit_only_passed_to_grow_molecules(
         return ([r_atom], [])
 
     monkeypatch.setattr("cif_viewer.parser.grow_molecules", mock_grow_molecules)
+    monkeypatch.setattr("cif_viewer.viewer.is_polymer_structure", lambda *a, **kw: False)
 
     # Trigger render with Whole Molecule view mode
     widget._set_current_view_mode("Whole Molecule")

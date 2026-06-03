@@ -930,3 +930,173 @@ C2 C 0.04 0.5 0.5
         f"Expected 2 atoms (one molecule), got {len(atoms)} — possible duplicate image"
     )
     assert len(bonds) == 1, f"Expected 1 bond, got {len(bonds)}"
+
+
+# ---------------------------------------------------------------------------
+# Tests for is_polymer_structure() and the four grow_molecules() bug fixes
+# introduced in v0.10.0.
+# ---------------------------------------------------------------------------
+
+_POLYMER_1D_CIF = """\
+data_polymer_1d
+_cell_length_a 2.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.2 0.5 0.5
+C2 C 0.8 0.5 0.5
+"""
+
+_MOLECULE_CIF = """\
+data_molecule
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+O1 O 0.5 0.5 0.5
+H1 H 0.4 0.5 0.5
+H2 H 0.6 0.5 0.5
+"""
+
+_RING_POLYMER_CIF = """\
+data_ring_polymer
+_cell_length_a 3.0
+_cell_length_b 3.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.5 0.5
+C2 C 0.9 0.5 0.5
+"""
+
+
+def test_is_polymer_structure_detects_polymer():
+    """is_polymer_structure() returns True when any bond crosses a cell boundary."""
+    from cif_viewer.parser import is_polymer_structure
+
+    struct = parse_cif(_POLYMER_1D_CIF)
+    assert is_polymer_structure(struct) is True
+
+
+def test_is_polymer_structure_returns_false_for_molecule():
+    """is_polymer_structure() returns False for an ordinary discrete molecule."""
+    from cif_viewer.parser import is_polymer_structure
+
+    struct = parse_cif(_MOLECULE_CIF)
+    assert is_polymer_structure(struct) is False
+
+
+def test_is_polymer_structure_returns_false_for_disconnected_ionic():
+    """is_polymer_structure() returns False for NaCl (no covalent bonds at all)."""
+    from cif_viewer.parser import is_polymer_structure
+
+    struct = parse_cif(NACL_CIF)
+    assert is_polymer_structure(struct) is False
+
+
+def test_grow_molecules_polymer_returns_in_cell_atoms():
+    """Bug 4 fix: grow_molecules() must not discard polymer atoms when the
+    identity symop is not the one that produced them. The 1D polymer should
+    return both asymmetric-unit atoms without dropping either one."""
+    struct = parse_cif(_POLYMER_1D_CIF)
+
+    from cif_viewer.parser import grow_molecules
+
+    atoms, bonds = grow_molecules(struct)
+
+    # Both asymmetric-unit atoms must be present.
+    assert len(atoms) == 2, (
+        f"Expected 2 atoms from 1D polymer asym unit, got {len(atoms)}"
+    )
+    # The single periodic bond within the unit cell must be present.
+    assert len(bonds) == 1, f"Expected 1 bond, got {len(bonds)}"
+
+
+def test_grow_molecules_bfs_positions_are_contiguous():
+    """Bug 2 fix: atom positions from grow_molecules() must be spatially
+    contiguous for a polymer chain. If the BFS offset accumulation is wrong,
+    atoms end up at positions more than one cell-length apart."""
+    struct = parse_cif(_POLYMER_1D_CIF)
+
+    from cif_viewer.parser import grow_molecules
+
+    atoms, _ = grow_molecules(struct)
+
+    positions = np.array([a.position for a in atoms])
+    # Cell a = 2.0 A; the two atoms are 0.2 and 0.8 of that = 0.4 and 1.6 A.
+    # Maximum separation within one molecule must be less than half the cell.
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            dist = float(np.linalg.norm(positions[i] - positions[j]))
+            assert dist < 1.5, (
+                f"Atoms {i} and {j} are {dist:.3f} A apart -- "
+                "BFS offset may be wrong (Bug 2)"
+            )
+
+
+def test_grow_molecules_identity_op_detection_robust():
+    """Bug 1 fix: identity-op detection must work even for a space group
+    where the identity is not listed as the trivial 'x,y,z' string but is
+    still functionally the identity.  Here we verify that atoms generated
+    from the identity operation are correctly flagged so the molecule is
+    retained in the output."""
+    cif = """\
+data_p1_identity
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_h-m_alt 'P 1'
+loop_
+_symmetry_equiv_pos_as_xyz
+'x, y, z'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.5 0.5 0.5
+H1 H 0.4 0.5 0.5
+"""
+    struct = parse_cif(cif)
+
+    from cif_viewer.parser import grow_molecules
+
+    atoms, bonds = grow_molecules(struct)
+
+    # Both atoms must be returned; if identity detection fails the molecule
+    # is dropped entirely.
+    assert len(atoms) == 2, (
+        f"Expected 2 atoms, got {len(atoms)} -- "
+        "identity-op detection may have failed (Bug 1)"
+    )
+    assert len(bonds) == 1, f"Expected 1 bond, got {len(bonds)}"

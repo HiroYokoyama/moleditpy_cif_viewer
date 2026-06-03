@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
 from .parser import (
     CifStructure,
     celleditpy_cell_axis_segments,
+    is_polymer_structure,
     parse_cif_file,
     parse_cif_file_pymatgen,
 )
@@ -59,11 +60,24 @@ def _run_render_calculation(
     from .parser import grow_molecules, expand_supercell
 
     if view_mode == "Whole Molecule":
-        atoms, bonds = grow_molecules(
-            structure_to_render,
-            selected_disorder_key=selected_key,
-            tolerance=tolerance,
-        )
+        # Auto-detect polymers / frameworks: if any bond in the asymmetric unit
+        # crosses a unit-cell boundary the structure is a periodic framework
+        # (COF, MOF, coordination polymer, etc.).  grow_molecules() cannot
+        # produce a meaningful finite molecule for these, so fall back to
+        # showing the 1×1×1 unit cell instead.
+        if is_polymer_structure(structure_to_render, tolerance=tolerance):
+            atoms, bonds = expand_supercell(
+                structure_to_render,
+                (1, 1, 1),
+                keep_connected=False,
+                tolerance=tolerance,
+            )
+        else:
+            atoms, bonds = grow_molecules(
+                structure_to_render,
+                selected_disorder_key=selected_key,
+                tolerance=tolerance,
+            )
     elif view_mode == "Asymmetric Unit":
         atoms, bonds = expand_supercell(
             structure_to_render,
@@ -1443,6 +1457,23 @@ class CifViewerWidget(QWidget):
 
         self._update_disorder_ui()
         self._update_info_ui()
+
+        # Auto-detect polymer / framework structures and switch mode.
+        # "Whole Molecule" is meaningless for COFs, MOFs, and coordination
+        # polymers because there is no finite molecule to complete; the user
+        # would see a distorted or empty rendering.  Switch to
+        # "Asymmetric Unit" automatically and inform the user once.
+        if self.radio_mol.isChecked() and self.structure is not None:
+            try:
+                if is_polymer_structure(self.structure):
+                    self._set_current_view_mode("Asymmetric Unit")
+                    self.summary_label.setText(
+                        "Polymer / framework detected. Switched to "
+                        '"Asymmetric Unit" mode automatically. '
+                        'Use "Packing" to view more of the crystal.'
+                    )
+            except Exception as exc:
+                logging.debug("is_polymer_structure check failed: %s", exc)
 
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
