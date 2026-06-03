@@ -412,7 +412,7 @@ class CifViewerWidget(QWidget):
         self.polymer_warning_label = QLabel(
             "Polymer / framework detected.\n'Whole Molecule' mode disabled."
         )
-        self.polymer_warning_label.setStyleSheet("color: #d32f2f; font-weight: bold;")
+        self.polymer_warning_label.setStyleSheet("font-weight: bold;")
         self.polymer_warning_label.setVisible(False)
         mode_group_layout.addWidget(self.polymer_warning_label)
 

@@ -1117,7 +1117,7 @@ def is_polymer_structure(structure: CifStructure, tolerance: float = 0.45) -> bo
     )
     if not core_atoms:
         return False
-    
+
     exp_atoms, _ = _expand_to_unit_cell(structure, core_atoms)
     if not exp_atoms:
         return False
@@ -1136,14 +1136,16 @@ def is_polymer_structure(structure: CifStructure, tolerance: float = 0.45) -> bo
                 return True
     return False
 
+
 def _expand_to_unit_cell(
-    structure: CifStructure, 
+    structure: CifStructure,
     core_atoms: Sequence[CifAtom],
-    selected_disorder_key: Optional[str] = None
+    selected_disorder_key: Optional[str] = None,
 ) -> Tuple[List[CifAtom], List[bool]]:
     symops = get_space_group_operations(structure)
     if not symops:
         from pymatgen.core.operations import SymmOp
+
         symops = [SymmOp.from_xyz_str("x, y, z")]
 
     exp_atoms: List[CifAtom] = []
@@ -1259,7 +1261,9 @@ def grow_molecules(
     if not core_atoms:
         return [], []
 
-    exp_atoms, is_asym = _expand_to_unit_cell(structure, core_atoms, selected_disorder_key)
+    exp_atoms, is_asym = _expand_to_unit_cell(
+        structure, core_atoms, selected_disorder_key
+    )
 
     if not exp_atoms:
         return [], []
