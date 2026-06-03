@@ -1130,10 +1130,29 @@ def is_polymer_structure(structure: CifStructure, tolerance: float = 0.45) -> bo
         tuple(exp_atoms),
     )
     adj = _infer_periodic_adjacency(tmp)
-    for neighbors in adj.values():
-        for _, shift in neighbors:
-            if np.any(shift != 0):
-                return True
+    N = len(exp_atoms)
+    visited = [False] * N
+
+    for start in range(N):
+        if visited[start]:
+            continue
+        # BFS with first-path-wins offset assignment
+        offsets: Dict[int, np.ndarray] = {start: np.zeros(3, dtype=int)}
+        queue = [start]
+        visited[start] = True
+        while queue:
+            curr = queue.pop(0)
+            for nb, shift in adj[curr]:
+                if nb not in offsets:
+                    offsets[nb] = offsets[curr] + shift
+                    visited[nb] = True
+                    queue.append(nb)
+                else:
+                    # Ring-closing edge: check whether it wraps around the cell.
+                    # If offsets[nb] != offsets[curr] + shift, the component
+                    # is topologically periodic (a polymer / framework).
+                    if not np.array_equal(offsets[nb], offsets[curr] + shift):
+                        return True
     return False
 
 
