@@ -1110,19 +1110,24 @@ def is_polymer_structure(structure: CifStructure, tolerance: float = 0.45) -> bo
     "Whole Molecule" mode for COFs, MOFs, and other framework materials
     where that mode would produce a distorted or empty rendering.
     """
-    core = (
+    core_atoms = (
         structure.asymmetric_atoms
         if structure.asymmetric_atoms is not None
         else structure.atoms
     )
-    if not core:
+    if not core_atoms:
         return False
+    
+    exp_atoms, _ = _expand_to_unit_cell(structure, core_atoms)
+    if not exp_atoms:
+        return False
+
     tmp = CifStructure(
         structure.name,
         structure.cell_lengths,
         structure.cell_angles,
         structure.lattice,
-        tuple(core),
+        tuple(exp_atoms),
     )
     adj = _infer_periodic_adjacency(tmp)
     for neighbors in adj.values():
@@ -1130,6 +1135,99 @@ def is_polymer_structure(structure: CifStructure, tolerance: float = 0.45) -> bo
             if np.any(shift != 0):
                 return True
     return False
+
+def _expand_to_unit_cell(
+    structure: CifStructure, 
+    core_atoms: Sequence[CifAtom],
+    selected_disorder_key: Optional[str] = None
+) -> Tuple[List[CifAtom], List[bool]]:
+    symops = get_space_group_operations(structure)
+    if not symops:
+        from pymatgen.core.operations import SymmOp
+        symops = [SymmOp.from_xyz_str("x, y, z")]
+
+    exp_atoms: List[CifAtom] = []
+    is_asym: List[bool] = []
+    seen_fracs: List[np.ndarray] = []
+
+    for atom in core_atoms:
+        if selected_disorder_key is not None and atom.disorder_group is not None:
+            if (
+                atom.disorder_group != selected_disorder_key
+                and atom.disorder_key != selected_disorder_key
+            ):
+                continue
+
+        for op in symops:
+            identity = False
+            try:
+                identity = np.allclose(op.rotation_matrix, np.eye(3)) and np.allclose(
+                    op.translation_vector, np.zeros(3)
+                )
+            except Exception:
+                try:
+                    t1 = np.array([0.123, 0.456, 0.789])
+                    t2 = np.array([0.321, 0.654, 0.987])
+                    t3 = np.array([0.111, 0.222, 0.333])
+                    identity = (
+                        np.allclose(op.operate(t1), t1)
+                        and np.allclose(op.operate(t2), t2)
+                        and np.allclose(op.operate(t3), t3)
+                    )
+                except Exception:
+                    pass
+
+            u_cart_site = None
+            u0 = getattr(atom, "u_cart", None)
+            if u0 is not None and not np.allclose(u0, 0.0):
+                try:
+                    A = structure.lattice.T
+                    R_cart = A @ op.rotation_matrix @ np.linalg.inv(A)
+                    u_cart_site = R_cart @ u0 @ R_cart.T
+                except Exception:
+                    u_cart_site = u0
+
+            frac = op.operate(atom.fract) % 1.0
+
+            dup = False
+            lattice = structure.lattice
+            for p in seen_fracs:
+                df0 = frac[0] - p[0]
+                df1 = frac[1] - p[1]
+                df2 = frac[2] - p[2]
+
+                df0 -= round(df0)
+                df1 -= round(df1)
+                df2 -= round(df2)
+
+                dx = df0 * lattice[0, 0] + df1 * lattice[1, 0] + df2 * lattice[2, 0]
+                dy = df0 * lattice[0, 1] + df1 * lattice[1, 1] + df2 * lattice[2, 1]
+                dz = df0 * lattice[0, 2] + df1 * lattice[1, 2] + df2 * lattice[2, 2]
+
+                if dx * dx + dy * dy + dz * dz < 0.0025:
+                    dup = True
+                    break
+
+            if dup:
+                continue
+            seen_fracs.append(frac.copy())
+
+            cart = frac @ structure.lattice
+            exp_atoms.append(
+                CifAtom(
+                    atom.label,
+                    atom.element,
+                    frac,
+                    cart,
+                    atom.occupancy,
+                    disorder_group=atom.disorder_group,
+                    disorder_assembly=atom.disorder_assembly,
+                    u_cart=u_cart_site,
+                )
+            )
+            is_asym.append(identity)
+
+    return exp_atoms, is_asym
 
 
 def grow_molecules(
@@ -1161,99 +1259,7 @@ def grow_molecules(
     if not core_atoms:
         return [], []
 
-    symops = get_space_group_operations(structure)
-    if not symops:
-        from pymatgen.core.operations import SymmOp
-
-        symops = [SymmOp.from_xyz_str("x, y, z")]
-
-    # --- Step 1: expand asymmetric unit via symops, wrap to [0,1), deduplicate ---
-    exp_atoms: List[CifAtom] = []
-    is_asym: List[bool] = []
-    seen_fracs: List[np.ndarray] = []
-
-    for atom in core_atoms:
-        if selected_disorder_key is not None and atom.disorder_group is not None:
-            if (
-                atom.disorder_group != selected_disorder_key
-                and atom.disorder_key != selected_disorder_key
-            ):
-                continue
-
-        for op in symops:
-            # --- Bug 1 fix: robust identity detection ---
-            # Use three distinct test points to confirm the op is truly the
-            # identity even when rotation_matrix / translation_vector attributes
-            # are missing or raise (some pymatgen op wrappers do this).
-            identity = False
-            try:
-                identity = np.allclose(op.rotation_matrix, np.eye(3)) and np.allclose(
-                    op.translation_vector, np.zeros(3)
-                )
-            except Exception:
-                try:
-                    t1 = np.array([0.123, 0.456, 0.789])
-                    t2 = np.array([0.321, 0.654, 0.987])
-                    t3 = np.array([0.111, 0.222, 0.333])
-                    identity = (
-                        np.allclose(op.operate(t1), t1)
-                        and np.allclose(op.operate(t2), t2)
-                        and np.allclose(op.operate(t3), t3)
-                    )
-                except Exception:
-                    pass
-
-            # rotate ADP tensor
-            u_cart_site = None
-            u0 = getattr(atom, "u_cart", None)
-            if u0 is not None and not np.allclose(u0, 0.0):
-                try:
-                    A = structure.lattice.T
-                    R_cart = A @ op.rotation_matrix @ np.linalg.inv(A)
-                    u_cart_site = R_cart @ u0 @ R_cart.T
-                except Exception:
-                    u_cart_site = u0
-
-            frac = op.operate(atom.fract) % 1.0
-
-            # deduplicate via fast pure-Python distance checks
-            dup = False
-            lattice = structure.lattice
-            for p in seen_fracs:
-                df0 = frac[0] - p[0]
-                df1 = frac[1] - p[1]
-                df2 = frac[2] - p[2]
-
-                df0 -= round(df0)
-                df1 -= round(df1)
-                df2 -= round(df2)
-
-                dx = df0 * lattice[0, 0] + df1 * lattice[1, 0] + df2 * lattice[2, 0]
-                dy = df0 * lattice[0, 1] + df1 * lattice[1, 1] + df2 * lattice[2, 1]
-                dz = df0 * lattice[0, 2] + df1 * lattice[1, 2] + df2 * lattice[2, 2]
-
-                if dx * dx + dy * dy + dz * dz < 0.0025:  # 0.05 Å threshold
-                    dup = True
-                    break
-
-            if dup:
-                continue
-            seen_fracs.append(frac.copy())
-
-            cart = frac @ structure.lattice
-            exp_atoms.append(
-                CifAtom(
-                    atom.label,
-                    atom.element,
-                    frac,
-                    cart,
-                    atom.occupancy,
-                    disorder_group=atom.disorder_group,
-                    disorder_assembly=atom.disorder_assembly,
-                    u_cart=u_cart_site,
-                )
-            )
-            is_asym.append(identity)
+    exp_atoms, is_asym = _expand_to_unit_cell(structure, core_atoms, selected_disorder_key)
 
     if not exp_atoms:
         return [], []
