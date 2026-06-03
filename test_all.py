@@ -36,6 +36,10 @@ def main():
         else:
             pytest_args.append(arg)
 
+    # Enable coverage reporting by default unless skipped
+    if not any("--cov" in arg for arg in pytest_args):
+        pytest_args.extend(["--cov=cif_viewer", "--cov-report=term-missing"])
+
     # 5. Check if PyQt6 can be imported and initialized
     has_qt = False
     if not unit_only:
