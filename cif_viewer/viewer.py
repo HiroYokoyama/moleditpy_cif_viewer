@@ -1464,10 +1464,8 @@ class CifViewerWidget(QWidget):
         if mw is not None:
             if hasattr(mw, "init_manager"):
                 mw.init_manager.current_file_path = path
-            if hasattr(mw, "state_manager") and hasattr(
-                mw.state_manager, "update_window_title"
-            ):
-                mw.state_manager.update_window_title()
+        if self.context is not None:
+            self.context.mark_project_modified()
 
         self.structure_table.blockSignals(True)
         self.structure_table.setRowCount(len(self.all_structures))
