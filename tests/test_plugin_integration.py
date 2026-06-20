@@ -51,6 +51,12 @@ class StubContext:
     def show_status_message(self, msg, duration=0):
         pass
 
+    def mark_project_modified(self):
+        pass
+
+    def reset_3d_camera(self):
+        pass
+
 
 def test_initialize_registers_visualization_entry_points():
     context = StubContext()

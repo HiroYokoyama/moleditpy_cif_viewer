@@ -4,7 +4,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QProgressDialog
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.10.0"
+PLUGIN_VERSION = "0.11.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -12,7 +12,7 @@ PLUGIN_DESCRIPTION = (
     "supercell rendering for MoleditPy."
 )
 PLUGIN_DEPENDENCIES = ["numpy", "pymatgen", "PyQt6", "pyvista", "rdkit"]
-PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=3.0.0, <5.0.0"
+PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=4.0.0, <5.0.0"
 
 WINDOW_ID = "cif_viewer_panel"
 
@@ -245,7 +245,7 @@ def initialize(context):
                 ):
                     if getattr(w, "_reset_camera_on_next_render", False):
                         try:
-                            self_vm.plotter.reset_camera()
+                            context.reset_3d_camera()
                             w._reset_camera_on_next_render = False
                         except Exception as e:
                             logging.debug(
