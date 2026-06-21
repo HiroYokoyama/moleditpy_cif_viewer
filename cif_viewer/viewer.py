@@ -1890,16 +1890,36 @@ class CifViewerWidget(QWidget):
         return np.sum(scaled, axis=0) / 2.0
 
     def _enter_viewer_mode(self):
+        if self.context is not None:
+            for method_name in ("enter_3d_mode", "enter_3d_viewer_mode"):
+                method = getattr(self.context, method_name, None)
+                if method is not None and callable(method):
+                    try:
+                        method()
+                        return
+                    except Exception as exc:
+                        logging.debug("Failed to call context.%s: %s", method_name, exc)
+
         main_window = self._main_window()
         if main_window is None:
             return
         ui_manager = getattr(main_window, "ui_manager", None)
-        if ui_manager is not None and hasattr(ui_manager, "_enter_3d_viewer_ui_mode"):
-            try:
-                ui_manager._enter_3d_viewer_ui_mode()
-                return
-            except Exception as exc:
-                logging.debug("Failed to enter 3D viewer UI mode: %s", exc)
+        if ui_manager is not None:
+            for method_name in (
+                "enter_3d_viewer_mode",
+                "enter_3d_viewer_ui_mode",
+                "_enter_3d_viewer_ui_mode",
+            ):
+                method = getattr(ui_manager, method_name, None)
+                if method is not None and callable(method):
+                    try:
+                        method()
+                        return
+                    except Exception as exc:
+                        logging.debug(
+                            "Failed to call ui_manager.%s: %s", method_name, exc
+                        )
+
         for attr in ("splitter", "main_splitter", "central_splitter"):
             splitter = getattr(main_window, attr, None)
             if splitter is not None and hasattr(splitter, "setSizes"):
