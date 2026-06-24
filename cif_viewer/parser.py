@@ -1004,8 +1004,6 @@ def get_space_group_operations(structure: CifStructure) -> list:
 
 
 def _infer_periodic_adjacency(structure: CifStructure):
-    import math
-
     adjacency = {atom_index: [] for atom_index in range(len(structure.atoms))}
     lattice = structure.lattice
 

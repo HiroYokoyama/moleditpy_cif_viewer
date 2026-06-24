@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Sequence, Tuple
 
 
@@ -36,8 +37,6 @@ def render_atoms_to_rdkit_mol(
             rdDetermineBonds.DetermineBondOrders(mol, charge=0)
             mol.SetProp("_bond_order_error", "")
         except Exception as exc:
-            import logging
-
             logging.warning("RDKit DetermineBondOrders failed: %s", exc)
             mol.SetProp("_bond_order_error", str(exc))
     else:

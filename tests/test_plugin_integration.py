@@ -1272,7 +1272,9 @@ C3 C 0.3 0.3 0.3 . .
     assert widget.info_num_restraints.text() == "0"
     assert widget.info_goof.text() == "1.05"
     assert widget.info_r1.text() == "0.045"
-    assert widget.info_wr2.text() == "0.120"
+    # No _refine_ls_wr_factor_gt in this CIF; _refine_ls_wr_factor_ref is all-data
+    # wR2 and appears in wr2_all, so [I>2σ] field shows N/A.
+    assert widget.info_wr2.text() == "N/A"
     assert widget.info_r1_all.text() == "0.055"
     assert widget.info_wr2_all.text() == "0.130"
     assert widget.info_max_shift.text() == "0.002"
@@ -2212,3 +2214,243 @@ def test_asymmetric_unit_ignores_repeats(monkeypatch):
     # 3. Assert repeats were ignored and it only rendered 1 atom (the 1x1x1 original)
     assert len(last_rendered) == 1
     assert last_rendered[0].label == "C1"
+
+
+def test_draw_with_moleditpy_updates_current_molecule(qtbot):
+    """_draw_with_moleditpy must set context.current_molecule so style switches work."""
+    from cif_viewer.viewer import CifViewerWidget
+    from rdkit import Chem
+
+    class TrackingContext(StubContext):
+        def __init__(self):
+            super().__init__()
+            self._current_molecule = None
+
+        @property
+        def current_molecule(self):
+            return self._current_molecule
+
+        @current_molecule.setter
+        def current_molecule(self, mol):
+            self._current_molecule = mol
+            # Mirror V4 setter: propagates to view_3d_manager so style switches
+            # can call draw_molecule_3d(current_mol) with the right molecule.
+            vm = getattr(self.main_window, "view_3d_manager", None)
+            if vm is not None:
+                vm.draw_molecule_3d(mol)
+
+    class FakeView3DManager:
+        def __init__(self):
+            self.current_mol = None
+
+        def draw_molecule_3d(self, mol):
+            self.current_mol = mol
+
+    context = TrackingContext()
+    context.main_window.view_3d_manager = FakeView3DManager()
+
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+
+    mol = Chem.Mol()
+    mol.SetProp("_from_cif_viewer", "1")
+    widget._draw_with_moleditpy(mol)
+
+    # current_molecule must be set so subsequent style switches use the CIF mol
+    assert context.current_molecule is mol
+    assert context.main_window.view_3d_manager.current_mol is mol
+
+
+def test_style_switch_triggers_overlay_render_when_cif_active(monkeypatch):
+    """Switching any 3D style while the CIF panel is open must re-render overlays."""
+    _install_fake_qt(monkeypatch)
+
+    class MockViewerWidget:
+        def __init__(self, dock, context):
+            self.structure = "dummy"
+            self.overlay_renders = 0
+            self.cleared = False
+
+        def render_overlays_only(self):
+            self.overlay_renders += 1
+
+        def clear_view(self):
+            self.cleared = True
+
+    fake_viewer = types.ModuleType("cif_viewer.viewer")
+    fake_viewer.CifViewerWidget = MockViewerWidget
+    monkeypatch.setitem(sys.modules, "cif_viewer.viewer", fake_viewer)
+
+    class FakeView3DManager:
+        def __init__(self):
+            self.current_mol = None
+
+        def draw_molecule_3d(self, mol):
+            self.current_mol = mol
+
+        def set_3d_style(self, _name):
+            # Built-in styles call draw_molecule_3d(current_mol); Thermal Ellipsoids
+            # calls draw_ellipsoid_model(mw, current_mol) separately — both require
+            # current_mol to be the CIF mol for the hook / callback to fire correctly.
+            self.draw_molecule_3d(self.current_mol)
+
+    vm = FakeView3DManager()
+    context = StubContext()
+    context.main_window.view_3d_manager = vm
+
+    initialize(context)
+
+    show_panel = context.menu_actions[0][1]
+    show_panel()
+    dock = context.get_window("cif_viewer_panel")
+    dock._visible = True
+    dock.isVisible = lambda: dock._visible
+
+    assert vm._cif_viewer_hooked is True
+
+    class CifMol:
+        def HasProp(self, name):
+            return name == "_from_cif_viewer"
+
+    cif_mol = CifMol()
+
+    # Simulate what context.current_molecule setter does in V4: calls draw_molecule_3d
+    vm.draw_molecule_3d(cif_mol)
+    widget = dock.widget()
+    assert widget.overlay_renders == 1
+    assert vm.current_mol is cif_mol
+
+    # Style switch: set_3d_style calls draw_molecule_3d(current_mol) — hook must fire
+    vm.set_3d_style("ball_and_stick")
+    assert widget.overlay_renders == 2
+    assert widget.cleared is False
+
+    # A second style switch also works (hook stays active while panel is visible)
+    vm.set_3d_style("stick")
+    assert widget.overlay_renders == 3
+
+
+# ---------------------------------------------------------------------------
+# Info tab correctness
+# ---------------------------------------------------------------------------
+
+_MINIMAL_CELL = """\
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.0 0.0 0.0
+"""
+
+
+def _make_cif_widget(qtbot, tmp_path, extra_tags: str):
+    """Helper: write a CIF with extra_tags, load it, return the widget."""
+    from cif_viewer.viewer import CifViewerWidget
+
+    context = StubContext()
+
+    class FakePlotter:
+        def clear(self):
+            pass
+
+        def add_lines(self, *a, **kw):
+            pass
+
+        def add_point_labels(self, *a, **kw):
+            pass
+
+        def render(self):
+            pass
+
+        def reset_camera(self):
+            pass
+
+    context.plotter = FakePlotter()
+    widget = CifViewerWidget(context=context)
+    qtbot.addWidget(widget)
+
+    cif_text = f"data_test\n{extra_tags}\n{_MINIMAL_CELL}"
+    cif_file = tmp_path / "test.cif"
+    cif_file.write_text(cif_text, encoding="utf-8")
+    widget.load_cif(str(cif_file))
+    return widget
+
+
+def test_info_r1_shows_na_when_only_all_data_r1_present(qtbot, tmp_path):
+    """R1 [I>2σ] label must not fall back to the all-data R1 value."""
+    widget = _make_cif_widget(
+        qtbot,
+        tmp_path,
+        "_refine_ls_r_factor_all 0.055\n",
+    )
+    # No _refine_ls_r_factor_gt → [I>2σ] R1 is unknown, must show N/A
+    assert widget.info_r1.text() == "N/A"
+    # All-data R1 must still be visible in its own field
+    assert widget.info_r1_all.text() == "0.055"
+
+
+def test_info_wr2_all_captures_wr_factor_ref(qtbot, tmp_path):
+    """_refine_ls_wr_factor_ref is the all-data wR2 (SHELX convention).
+    When no _refine_ls_wr_factor_gt is present the [I>2σ] field shows N/A and
+    the all-data field shows the wr_factor_ref value."""
+    widget = _make_cif_widget(
+        qtbot,
+        tmp_path,
+        "_refine_ls_wr_factor_ref 0.120\n",
+    )
+    # No _refine_ls_wr_factor_gt → [I>2σ] wR2 is genuinely unknown
+    assert widget.info_wr2.text() == "N/A"
+    # _refine_ls_wr_factor_ref is all-data wR2 → appears in all-data field
+    assert widget.info_wr2_all.text() == "0.120"
+
+
+def test_info_wr2_differentiates_gt_from_all(qtbot, tmp_path):
+    """When both _refine_ls_wr_factor_gt ([I>2σ]) and _refine_ls_wr_factor_ref (all data)
+    are present they appear in the correct labels."""
+    widget = _make_cif_widget(
+        qtbot,
+        tmp_path,
+        "_refine_ls_wr_factor_gt 0.1760\n_refine_ls_wr_factor_ref 0.1798\n",
+    )
+    assert widget.info_wr2.text() == "0.1760"
+    assert widget.info_wr2_all.text() == "0.1798"
+
+
+def test_powder_pattern_sym_label_shows_space_group(qtbot):
+    """PowderPatternDialog.sym_label must display the structure's space group."""
+    from cif_viewer.viewer_xrd import PowderPatternDialog
+    from cif_viewer.parser import parse_cif
+
+    cif_content = """\
+data_sym_test
+_space_group_name_h-m_alt 'P -1'
+_space_group_it_number 2
+_cell_length_a 5.0
+_cell_length_b 6.0
+_cell_length_c 7.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    structure = parse_cif(cif_content)
+    dialog = PowderPatternDialog(structure)
+    qtbot.addWidget(dialog)
+
+    label_text = dialog.sym_label.text()
+    assert "P -1" in label_text
+    assert "2" in label_text  # space group number

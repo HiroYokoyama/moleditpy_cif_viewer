@@ -1,10 +1,16 @@
+import math
 import os
 import logging
+import re
+import traceback
+import types
+
+import numpy as np
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QProgressDialog
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "0.11.1"
+PLUGIN_VERSION = "1.0.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -45,9 +51,7 @@ class EllipsoidWorkerThread(QThread):
 
     def run(self):
         try:
-            import numpy as np
             import pyvista as pv
-            import math
 
             fallback_positions = []
             fallback_colors = []
@@ -118,7 +122,7 @@ class EllipsoidWorkerThread(QThread):
                             (index, radii, eigenvectors, pos)
                         )
                     except Exception as exc:
-                        print(f"Error drawing ellipsoid for {symbol}: {exc}")
+                        logging.warning("draw ellipsoid for %s: %s", symbol, exc)
                 else:
                     if symbol == "H":
                         h_vdw = 1.2
@@ -210,26 +214,18 @@ class EllipsoidWorkerThread(QThread):
                 merged_ellipsoids, fallback_glyphs, h_glyphs, rings_mesh, ""
             )
         except Exception as exc:
-            import traceback
-
             err_trace = traceback.format_exc()
             self.result_ready.emit(None, None, None, None, f"{exc}\n{err_trace}")
 
 
 def initialize(context):
     def apply_hook(vm, orig_draw):
-        import types
-
         if getattr(vm, "_cif_viewer_hooked", False):
             return
 
         def hooked_draw(self_vm, mol, *args, **kwargs):
             orig_draw(mol, *args, **kwargs)
-            dock_widget = (
-                context.get_window(WINDOW_ID)
-                if hasattr(context, "get_window")
-                else None
-            )
+            dock_widget = context.get_window(WINDOW_ID)
             if dock_widget is not None and dock_widget.widget() is not None:
                 w = dock_widget.widget()
                 if (
@@ -287,7 +283,7 @@ def initialize(context):
                 else:
                     revert_hook(vm, vm._orig_draw_molecule_3d)
 
-        dock = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
+        dock = context.get_window(WINDOW_ID)
         if dock is None:
             dock = QDockWidget(f"CIF Viewer v{PLUGIN_VERSION}", main_window)
             dock.setAllowedAreas(
@@ -300,8 +296,7 @@ def initialize(context):
 
             if main_window is not None and hasattr(main_window, "addDockWidget"):
                 main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-            if hasattr(context, "register_window"):
-                context.register_window(WINDOW_ID, dock)
+            context.register_window(WINDOW_ID, dock)
 
             dock.show()
             dock.raise_()
@@ -342,7 +337,7 @@ def initialize(context):
         return False
 
     def handle_reset():
-        dock = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
+        dock = context.get_window(WINDOW_ID)
         if dock is not None and dock.widget() is not None:
             dock.widget().clear_view()
 
@@ -368,7 +363,7 @@ def initialize(context):
         if plotter is None:
             return
 
-        dock = context.get_window(WINDOW_ID) if hasattr(context, "get_window") else None
+        dock = context.get_window(WINDOW_ID)
         widget = dock.widget() if dock is not None else None
 
         has_adp = False
@@ -440,8 +435,6 @@ def initialize(context):
         )
 
         def get_scale_factor(p_percent):
-            import math
-
             p = p_percent / 100.0
             if p <= 0 or p >= 1:
                 return 1.5382
@@ -465,8 +458,6 @@ def initialize(context):
             if hasattr(widget, "probability_spin"):
                 scale_factor = get_scale_factor(widget.probability_spin.value())
             elif hasattr(widget, "probability_combo"):
-                import re
-
                 prob_text = widget.probability_combo.currentText()
                 try:
                     match = re.search(r"\(([\d\.]+)\)", prob_text)
@@ -495,8 +486,6 @@ def initialize(context):
                 from moleditpy.utils.constants import CPK_COLORS_PV as CPK_COLORS
             except ImportError:
                 CPK_COLORS = {}
-
-        import numpy as np
 
         sym = [a.GetSymbol() for a in mol.GetAtoms()]
         col = np.array([CPK_COLORS.get(s, [0.5, 0.5, 0.5]) for s in sym])
@@ -872,11 +861,7 @@ def initialize(context):
 
     context.add_menu_action("View/CIF Viewer Panel", open_from_menu)
 
-    if hasattr(context, "register_file_opener"):
-        context.register_file_opener(".cif", open_file, priority=20)
-    if hasattr(context, "register_drop_handler"):
-        context.register_drop_handler(handle_drop, priority=20)
-    if hasattr(context, "register_document_reset_handler"):
-        context.register_document_reset_handler(handle_reset)
-    if hasattr(context, "register_3d_style"):
-        context.register_3d_style("Thermal Ellipsoids", draw_ellipsoid_model)
+    context.register_file_opener(".cif", open_file, priority=20)
+    context.register_drop_handler(handle_drop, priority=20)
+    context.register_document_reset_handler(handle_reset)
+    context.register_3d_style("Thermal Ellipsoids", draw_ellipsoid_model)

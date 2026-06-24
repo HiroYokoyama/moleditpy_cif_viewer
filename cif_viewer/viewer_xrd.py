@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -190,6 +192,12 @@ class PowderPatternDialog(QDialog):
         form_layout_3.addRow(self.label_peaks_chk)
 
         self.sym_label = QLabel()
+        sg = getattr(self.cif_structure, "space_group", None) or "Unknown"
+        sg_num = getattr(self.cif_structure, "space_group_number", None)
+        sym_text = f"Space Group: {sg}"
+        if sg_num:
+            sym_text += f" (No. {sg_num})"
+        self.sym_label.setText(sym_text)
         form_layout_3.addRow(self.sym_label)
 
         controls_layout.addLayout(form_layout_3)
@@ -438,8 +446,6 @@ class PowderPatternDialog(QDialog):
             return
 
         try:
-            import csv
-
             if export_profile:
                 with open(path, "w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)

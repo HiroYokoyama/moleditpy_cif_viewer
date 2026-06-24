@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 import os
 import logging
+import re
+import traceback
 from typing import Optional
 
 import numpy as np
@@ -157,8 +161,6 @@ class RenderThread(QThread):
             )
             self.result_ready.emit(last_rendered_atoms, bonds, mol, "")
         except Exception as exc:
-            import traceback
-
             err_trace = traceback.format_exc()
             self.result_ready.emit([], [], None, f"{exc}\n{err_trace}")
 
@@ -227,7 +229,6 @@ class CifViewerWidget(QWidget):
             return
 
         try:
-            import dataclasses
             from .parser import grow_molecules, write_supercell_cif
 
             view_mode = self._get_current_view_mode()
@@ -663,6 +664,10 @@ class CifViewerWidget(QWidget):
         self.keep_connected.toggled.connect(self.save_settings)
         supercell_layout.addRow(self.keep_connected)
 
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self._on_supercell_spin_changed)
+        supercell_layout.addRow(apply_btn)
+
         preset_row = QHBoxLayout()
         btn_111 = QPushButton("1x1x1")
         btn_111.clicked.connect(lambda: self.set_supercell_preset(1))
@@ -883,11 +888,10 @@ class CifViewerWidget(QWidget):
         spin = QSpinBox()
         spin.setRange(1, 8)
         spin.setValue(1)
-        spin.valueChanged.connect(self._on_supercell_spin_changed)
         return spin
 
     def _on_supercell_spin_changed(self):
-        """Switch to Packing mode when a repeat spinner changes, then render."""
+        """Switch to Packing mode and render (called by Apply button or presets)."""
         if not self.radio_pack.isChecked():
             self.radio_pack.setChecked(True)
         self._reset_camera_on_next_render = True
@@ -1254,8 +1258,8 @@ class CifViewerWidget(QWidget):
         self.info_num_params.setText(s.num_params or "N/A")
         self.info_num_restraints.setText(s.num_restraints or "N/A")
         self.info_goof.setText(s.goof or "N/A")
-        self.info_r1.setText(s.r1_gt or s.r1 or "N/A")
-        self.info_wr2.setText(s.wr2_gt or s.wr2 or "N/A")
+        self.info_r1.setText(s.r1_gt or "N/A")
+        self.info_wr2.setText(s.wr2_gt or "N/A")
         self.info_r1_all.setText(s.r1_all or "N/A")
         self.info_wr2_all.setText(s.wr2_all or "N/A")
         self.info_max_shift.setText(s.max_shift or "N/A")
@@ -1288,7 +1292,6 @@ class CifViewerWidget(QWidget):
         path = self._settings_path()
         if not os.path.exists(path):
             return
-        import json
 
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -1337,8 +1340,6 @@ class CifViewerWidget(QWidget):
             if "probability" in data:
                 try:
                     val_str = str(data["probability"])
-                    import re
-
                     match = re.search(r"([\d\.]+)", val_str)
                     if match:
                         val = float(match.group(1))
@@ -1397,8 +1398,6 @@ class CifViewerWidget(QWidget):
 
     def save_settings(self, *args):
         path = self._settings_path()
-        import json
-
         data = {
             "show_bonds": self.show_bonds.isChecked(),
             "determine_bond_order": self.determine_bond_order.isChecked(),
@@ -1579,8 +1578,6 @@ class CifViewerWidget(QWidget):
                 or atom.disorder_group == selected_key
                 or atom.disorder_key == selected_key
             ]
-
-        import dataclasses
 
         is_asym_only = (
             view_mode in ("Asymmetric Unit", "Whole Molecule")
@@ -1793,28 +1790,20 @@ class CifViewerWidget(QWidget):
                 err = mol.GetProp("_bond_order_error")
                 summary_text += f" (Bond order determination failed: {err})"
         self.summary_label.setText(summary_text)
-        if self.context and hasattr(self.context, "show_status_message"):
+        if self.context:
             self.context.show_status_message(
                 "CIF Viewer rendered with MoleditPy 3D style.", 3000
             )
 
     def _draw_with_moleditpy(self, mol):
-        if self.context is not None and hasattr(self.context, "draw_molecule_3d"):
-            try:
-                self.context.current_mol = mol
-            except Exception as exc:
-                logging.debug("Failed to assign context.current_mol directly: %s", exc)
-                self.context.draw_molecule_3d(mol)
+        if self.context is not None:
+            # Setting current_molecule (not draw_molecule_3d) updates
+            # view_3d_manager.current_mol so that subsequent style switches
+            # (ball-and-stick, ellipsoids, etc.) redraw with the CIF mol.
+            self.context.current_molecule = mol
             return
         main_window = self._main_window()
         if main_window is not None and hasattr(main_window, "draw_molecule_3d"):
-            if hasattr(main_window, "view_3d_manager"):
-                try:
-                    main_window.view_3d_manager.current_mol = mol
-                except Exception as exc:
-                    logging.debug(
-                        "Failed to set main_window.view_3d_manager.current_mol: %s", exc
-                    )
             main_window.draw_molecule_3d(mol)
 
     def _draw_cell_overlay(self, plotter, _repeats):
@@ -1942,7 +1931,7 @@ class CifViewerWidget(QWidget):
         return None
 
     def _main_window(self):
-        if self.context is not None and hasattr(self.context, "get_main_window"):
+        if self.context is not None:
             return self.context.get_main_window()
         parent = self.parent()
         return (
