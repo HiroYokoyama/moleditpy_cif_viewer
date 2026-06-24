@@ -3,6 +3,9 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725848.svg)](https://doi.org/10.5281/zenodo.20725848)
 [![CI](https://github.com/HiroYokoyama/moleditpy_cif_viewer/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/actions/workflows/test.yml)
 
+> [!WARNING]
+> The CIF (Crystallographic Information File) format is highly complex and has many variations. Therefore, parsing may contain bugs or compatibility issues. Please verify the results carefully for critical purposes. For publication purposes, it is recommended to use specialized software such as Mercury or Olex2.
+
 A crystal structure viewer plugin for [MoleditPy](https://github.com/HiroYokoyama/python_molecular_editor). 
 
 This plugin allows researchers and developers to load CIF files, generate supercells, customize rendering styles, view along crystallographic axes, and display anisotropic displacement parameters (Thermal Ellipsoids) with extensive styling options.
@@ -157,3 +160,7 @@ python test_all.py --unit-only
 *   **`PyQt6`**: Dockable GUI layouts, slider widgets, color pickers, and asynchronous timers.
 *   **`pyvista`**: High-level VTK wrapper for 3D rendering of structural meshes, borders, lines, and camera manipulations.
 *   **`rdkit`**: Cheminformatics library for atom modeling, bond perception, and property storage.
+
+## License & Disclaimer
+
+This is open-source software distributed under the GNU GPL v3 license. It is provided 'as is' without warranty of any kind, and the author assumes no responsibility or liability for the results. Although outputs have been carefully verified, users are strongly encouraged to independently check and validate results for critical purposes (such as publications). If you encounter any bugs, please open an issue.
