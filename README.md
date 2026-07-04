@@ -1,4 +1,4 @@
-﻿# MoleditPy CIF Viewer
+# MoleditPy CIF Viewer
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725848.svg)](https://doi.org/10.5281/zenodo.20725848)
 [![CI](https://github.com/HiroYokoyama/moleditpy_cif_viewer/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/actions/workflows/test.yml)
