@@ -1656,25 +1656,33 @@ def _read_cif_tokens(text: str):
 
 
 def _logical_lines(text: str) -> Iterable[str]:
-    multiline_tag = None
-    multiline_value: List[str] = []
+    # Standard CIF semicolon text field: a line starting with ';' in column 1
+    # opens a (possibly multi-line) value; another line starting with ';'
+    # closes it. The joined text is yielded as its own logical line -- the
+    # preceding bare tag line (already yielded) is matched to it by
+    # _read_cif_tokens' existing "single-token tag takes the next logical
+    # line as its value" fallback, so no tag-prefix reconstruction is needed
+    # here (and none is attempted, since re-tokenizing a multi-word value
+    # with _split_cif_line would only keep its first word).
+    in_text_field = False
+    value_lines: List[str] = []
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
-        if multiline_tag is not None:
+        if in_text_field:
             if line.startswith(";"):
-                yield f"{multiline_tag} {' '.join(multiline_value)}"
-                multiline_tag = None
-                multiline_value = []
+                yield "\n".join(value_lines).strip()
+                in_text_field = False
+                value_lines = []
             else:
-                multiline_value.append(line)
+                value_lines.append(line)
             continue
 
         stripped = _strip_comment(line).strip()
         if not stripped:
             continue
-        if stripped.startswith("_") and stripped.endswith(" ;"):
-            multiline_tag = stripped[:-2].strip()
-            multiline_value = []
+        if line.startswith(";"):
+            in_text_field = True
+            value_lines = [line[1:]] if line[1:].strip() else []
             continue
         yield stripped
 

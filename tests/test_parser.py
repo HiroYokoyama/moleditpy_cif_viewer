@@ -330,6 +330,35 @@ C3 C 0.3 0.3 0.3 . .
     assert structure.atoms[2].disorder_key is None
 
 
+def test_multiline_semicolon_text_field_is_parsed():
+    """Standard CIF text fields ('_tag' on its own line, followed by a value
+    delimited by ';' lines) must be read as the full multi-line text, not
+    lost or truncated to a stray ';' character."""
+    cif = """
+data_TextFieldTest
+_cell_length_a    10.0
+_cell_length_b    10.0
+_cell_length_c    10.0
+_cell_angle_alpha 90
+_cell_angle_beta  90
+_cell_angle_gamma 90
+_chemical_formula_structural
+;
+C10 H15 N O,
+a simple test compound
+;
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    structure = parse_cif(cif)
+    assert structure.formula == "C10 H15 N O,\na simple test compound"
+
+
 def test_parse_cif_file_pymatgen_disorder_and_metadata(tmp_path):
     from cif_viewer.parser import parse_cif_file_pymatgen
 
