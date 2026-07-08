@@ -675,7 +675,7 @@ C2 C 0.05 0.5 0.5
     assert len(bonds) == 1
 
 
-def test_grow_molecules_connected_only():
+def test_grow_molecules_keeps_all_in_cell_symmetry_components():
     from cif_viewer.parser import grow_molecules, parse_cif
     import numpy as np
 
@@ -699,11 +699,47 @@ C1 C 0.1 0.1 0.1
     struct = parse_cif(cif)
     atoms, bonds = grow_molecules(struct)
 
-    # Under P 1 21 1, there are 2 symmetry operations.
-    # The generated atoms are disconnected, so only the original one (or its connections) is kept.
-    assert len(atoms) == 1
-    assert atoms[0].label == "C1"
-    assert np.allclose(atoms[0].position, np.array([1.0, 1.0, 1.0]))
+    # Under P 1 21 1 there are 2 symmetry operations, so the cell physically
+    # contains 2 atoms. Per ALGORITHMS.md §2 Step 4, every component
+    # overlapping the unit-cell box is kept — including the screw-axis image
+    # with no identity-op atom (the old is_asym filter dropped it).
+    assert len(atoms) == 2
+    assert all(a.label == "C1" for a in atoms)
+    positions = sorted(tuple(np.round(a.position, 6)) for a in atoms)
+    # identity: (0.1,0.1,0.1) -> (1,1,1); 21 screw along b:
+    # (-x, y+1/2, -z) -> (0.9, 0.6, 0.9) -> (9,6,9)
+    assert np.allclose(positions[0], (1.0, 1.0, 1.0))
+    assert np.allclose(positions[1], (9.0, 6.0, 9.0))
+    # exactly one of the two carries the identity-op flag
+    assert sum(a.is_original_asym for a in atoms) == 1
+
+
+def test_grow_molecules_p1bar_keeps_inversion_image():
+    from cif_viewer.parser import grow_molecules, parse_cif
+
+    cif = """
+data_p1bar_test
+_cell_length_a 10.0
+_cell_length_b 10.0
+_cell_length_c 10.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_space_group_name_H-M_alt 'P -1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.1 0.1 0.1
+"""
+    struct = parse_cif(cif)
+    atoms, bonds = grow_molecules(struct)
+
+    # P -1 has Z=2: identity at (0.1,0.1,0.1) and inversion at (0.9,0.9,0.9).
+    # Both are physically present in the cell and must both be returned.
+    assert len(atoms) == 2
 
 
 def test_grow_molecules_polymer():

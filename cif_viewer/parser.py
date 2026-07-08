@@ -1319,8 +1319,13 @@ def grow_molecules(
                     visited[nb] = True
                     queue.append(nb)
 
-        # --- Step 4: keep molecules touching the original asymmetric unit ---
-        if not any(is_asym[i] for i, _ in mol):
+        # --- Step 4: keep molecules overlapping the [0,1)^3 unit-cell box ---
+        # (ALGORITHMS.md §2 Step 4: at least one unwrapped atom has offset
+        # [0,0,0]. exp_atoms are already wrapped into [0,1), so this keeps
+        # every symmetry-generated in-cell component instead of silently
+        # dropping those with no identity-op atom, which lost real atoms —
+        # e.g. only 1 of 2 sites in P-1 — and whole polymer components.)
+        if not any(np.all(off == 0) for _, off in mol):
             continue
 
         local: Dict[int, int] = {i: li for li, (i, _) in enumerate(mol)}
