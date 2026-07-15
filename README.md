@@ -64,6 +64,7 @@ The CIF Viewer control panel docks as a widget on the right side of the main win
 
 ### 4. Cell / Axes Tab
 *   **Show Unit Cell Checkbox**: Toggles the drawing of unit-cell borders.
+*   **Scale Cell Box to Supercell Checkbox**: By default the box always outlines the single `1 x 1 x 1` unit cell. When checked, it outlines the whole (possibly decimal) supercell instead.
 *   **a/b/c Axes Checkbox**: Toggles labels (`a`, `b`, `c`) and colored vectors at the origin.
 *   **Axis Width Spinbox**: Sets the line width of cell axes and cell borders (range 1 to 12, default `5`).
 *   **Font Selection**: Dropdown selecting the axis label font family (`arial`, `courier`, `times`).

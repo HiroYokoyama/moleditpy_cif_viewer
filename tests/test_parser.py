@@ -126,6 +126,29 @@ def test_expand_supercell_integer_repeats_do_not_crop_unwrapped_molecules():
     np.testing.assert_allclose(atoms[1].position, [10.5, 0.0, 0.0])
 
 
+def test_expand_supercell_fractional_repeats_keep_boundary_molecules_connected():
+    structure = parse_cif(BOUNDARY_CIF)
+
+    # Cropping must use the original wrapped coords (0.95, 0.05), not the
+    # unwrap-shifted ones (0.95, 1.05), so a near-integer repeat does not
+    # silently drop the unwrapped bond partner.
+    for repeat_a in (0.99, 1.01):
+        atoms, bonds = expand_supercell(
+            structure, (repeat_a, 1, 1), keep_connected=True
+        )
+        assert len(atoms) == 2
+        assert bonds == [(0, 1)]
+        np.testing.assert_allclose(atoms[1].position, [10.5, 0.0, 0.0])
+
+
+def test_expand_supercell_sub_cell_crops_by_wrapped_position():
+    structure = parse_cif(BOUNDARY_CIF)
+    atoms, _ = expand_supercell(structure, (0.5, 1, 1), keep_connected=True)
+
+    # C1 (fract 0.95) lies outside the half cell; C2 (fract 0.05) stays
+    assert [atom.label for atom in atoms] == ["C2"]
+
+
 def test_supercell_edges_fractional_repeats():
     structure = parse_cif(NACL_CIF)
     edges = supercell_edges(structure.lattice, (1.5, 1, 1))
@@ -205,6 +228,16 @@ def test_write_supercell_cif_fractional_repeats(tmp_path):
     assert len(exported_struct.atoms) == 3
     frac_xs = sorted(atom.fract[0] for atom in exported_struct.atoms)
     np.testing.assert_allclose(frac_xs, [0.0, 0.5 / 1.4, 1.0 / 1.4], atol=1e-5)
+
+
+def test_write_supercell_cif_fractional_keeps_connected_boundary_atoms(tmp_path):
+    structure = parse_cif(BOUNDARY_CIF)
+    export_path = tmp_path / "supercell_frac_connected.cif"
+    write_supercell_cif(str(export_path), structure, (0.99, 1, 1), keep_connected=True)
+
+    exported_struct = parse_cif(export_path.read_text(encoding="utf-8"))
+    # The unwrap-shifted bond partner (C2 at shifted fract 1.05) must survive
+    assert len(exported_struct.atoms) == 2
 
 
 def test_write_cif_no_cell(tmp_path):

@@ -742,6 +742,16 @@ class CifViewerWidget(QWidget):
         self.show_cell.toggled.connect(self.save_settings)
         cell_axes_layout.addRow(self.show_cell)
 
+        self.scale_cell_box = QCheckBox("Scale cell box to supercell")
+        self.scale_cell_box.setChecked(False)
+        self.scale_cell_box.setToolTip(
+            "When checked, the cell box outlines the whole (possibly decimal) "
+            "supercell instead of the single 1x1x1 unit cell."
+        )
+        self.scale_cell_box.toggled.connect(self.render)
+        self.scale_cell_box.toggled.connect(self.save_settings)
+        cell_axes_layout.addRow(self.scale_cell_box)
+
         self.show_axes = QCheckBox("a/b/c axes")
         self.show_axes.setChecked(True)
         self.show_axes.toggled.connect(self.render)
@@ -1017,6 +1027,7 @@ class CifViewerWidget(QWidget):
         self.show_hydrogens.blockSignals(True)
         self.keep_connected.blockSignals(True)
         self.show_cell.blockSignals(True)
+        self.scale_cell_box.blockSignals(True)
         self.show_axes.blockSignals(True)
         self.show_ellipsoid_rings.blockSignals(True)
         self.fix_h_size.blockSignals(True)
@@ -1037,6 +1048,7 @@ class CifViewerWidget(QWidget):
             self.show_hydrogens.setChecked(True)
             self.keep_connected.setChecked(True)
             self.show_cell.setChecked(True)
+            self.scale_cell_box.setChecked(False)
             self.show_axes.setChecked(True)
             self.show_ellipsoid_rings.setChecked(True)
             self.fix_h_size.setChecked(True)
@@ -1067,6 +1079,7 @@ class CifViewerWidget(QWidget):
             self.show_hydrogens.blockSignals(False)
             self.keep_connected.blockSignals(False)
             self.show_cell.blockSignals(False)
+            self.scale_cell_box.blockSignals(False)
             self.show_axes.blockSignals(False)
             self.show_ellipsoid_rings.blockSignals(False)
             self.fix_h_size.blockSignals(False)
@@ -1323,6 +1336,7 @@ class CifViewerWidget(QWidget):
             self.show_hydrogens.blockSignals(True)
             self.keep_connected.blockSignals(True)
             self.show_cell.blockSignals(True)
+            self.scale_cell_box.blockSignals(True)
             self.show_axes.blockSignals(True)
             self.show_ellipsoid_rings.blockSignals(True)
             self.fix_h_size.blockSignals(True)
@@ -1352,6 +1366,8 @@ class CifViewerWidget(QWidget):
                 self.keep_connected.setChecked(bool(data["keep_connected"]))
             if "show_cell" in data:
                 self.show_cell.setChecked(bool(data["show_cell"]))
+            if "scale_cell_box" in data:
+                self.scale_cell_box.setChecked(bool(data["scale_cell_box"]))
             if "show_axes" in data:
                 self.show_axes.setChecked(bool(data["show_axes"]))
             if "h_scale" in data:
@@ -1404,6 +1420,7 @@ class CifViewerWidget(QWidget):
             self.show_hydrogens.blockSignals(False)
             self.keep_connected.blockSignals(False)
             self.show_cell.blockSignals(False)
+            self.scale_cell_box.blockSignals(False)
             self.show_axes.blockSignals(False)
             self.show_ellipsoid_rings.blockSignals(False)
             self.fix_h_size.blockSignals(False)
@@ -1428,6 +1445,7 @@ class CifViewerWidget(QWidget):
             "show_hydrogens": self.show_hydrogens.isChecked(),
             "keep_connected": self.keep_connected.isChecked(),
             "show_cell": self.show_cell.isChecked(),
+            "scale_cell_box": self.scale_cell_box.isChecked(),
             "show_axes": self.show_axes.isChecked(),
             "show_ellipsoid_rings": self.show_ellipsoid_rings.isChecked(),
             "fix_h_size": self.fix_h_size.isChecked(),
@@ -1829,8 +1847,13 @@ class CifViewerWidget(QWidget):
         if main_window is not None and hasattr(main_window, "draw_molecule_3d"):
             main_window.draw_molecule_3d(mol)
 
-    def _draw_cell_overlay(self, plotter, _repeats):
+    def _draw_cell_overlay(self, plotter, repeats):
         lattice = np.asarray(self.structure.lattice, dtype=float)
+        if self.scale_cell_box.isChecked():
+            from .parser import normalize_repeats
+
+            scale = np.asarray(normalize_repeats(repeats), dtype=float)
+            lattice = lattice * scale[:, None]
         color_a = self.color_axis_a.property("color_hex")
         color_b = self.color_axis_b.property("color_hex")
         color_c = self.color_axis_c.property("color_hex")

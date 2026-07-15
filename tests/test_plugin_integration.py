@@ -754,6 +754,58 @@ def test_cif_viewer_widget_reset_supercell(qtbot):
     assert widget.repeat_c.value() == 3
 
 
+def test_cif_viewer_cell_overlay_scales_with_repeats(qtbot):
+    import numpy as np
+    from cif_viewer.viewer import CifViewerWidget
+    from cif_viewer.parser import parse_cif
+
+    widget = CifViewerWidget()
+    qtbot.addWidget(widget)
+    widget.structure = parse_cif(
+        """
+data_cubic
+_cell_length_a 10
+_cell_length_b 10
+_cell_length_c 10
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0 0 0
+"""
+    )
+
+    class FakePlotter:
+        def __init__(self):
+            self.lines = []
+
+        def add_lines(self, points, **kwargs):
+            self.lines.append(np.asarray(points))
+
+        def add_point_labels(self, *args, **kwargs):
+            pass
+
+    # Default: box always outlines the 1x1x1 unit cell regardless of repeats
+    plotter = FakePlotter()
+    widget._draw_cell_overlay(plotter, (1.5, 1, 2))
+    all_points = np.vstack(plotter.lines)
+    np.testing.assert_allclose(all_points.max(axis=0), [10.0, 10.0, 10.0])
+
+    # Opt-in setting scales the box to the decimal supercell
+    widget.scale_cell_box.blockSignals(True)
+    widget.scale_cell_box.setChecked(True)
+    widget.scale_cell_box.blockSignals(False)
+    plotter = FakePlotter()
+    widget._draw_cell_overlay(plotter, (1.5, 1, 2))
+    all_points = np.vstack(plotter.lines)
+    np.testing.assert_allclose(all_points.max(axis=0), [15.0, 10.0, 20.0])
+
+
 def test_cif_viewer_widget_switch_to_ellipsoids(qtbot):
     from cif_viewer.viewer import CifViewerWidget
 
