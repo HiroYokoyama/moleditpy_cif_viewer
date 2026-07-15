@@ -72,3 +72,7 @@ It simply:
 2. Clones it across a grid (e.g., $2 \times 2 \times 2$).
 3. Renders bonds strictly between atoms that are physically close in that specific expanded grid.
 4. It clips bonds at the boundary of the supercell, leaving "dangling" edges, which is standard practice for viewing infinite crystal lattices.
+
+### Decimal (partial) repeats
+
+Repeat counts may be non-integer (e.g. $1.5 \times 1 \times 1$). In that case the grid is tiled $\lceil n \rceil$ times along each axis, and afterwards every atom whose fractional coordinate exceeds the requested decimal value along a *non-integer* axis is discarded (boundary-inclusive, $\varepsilon = 10^{-6}$). Integer axes are never cropped, so unwrapped molecules protruding across cell borders in "keep connected" mode are preserved exactly as before. A repeat below 1 (e.g. $0.5$) therefore renders a slab of the unit cell. The CIF exporter applies the same cropping and scales the exported cell lengths by the decimal repeat.
