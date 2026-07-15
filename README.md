@@ -46,7 +46,7 @@ The CIF Viewer control panel docks as a widget on the right side of the main win
 *   **Export CIF Button**: Saves the currently rendered supercell structure (including duplicates and connection-fixes) into a new standard CIF file.
 
 ### 2. Supercell Tab
-*   **Repetitions ($a$, $b$, $c$)**: Spinboxes (range 0.1 to 8, default `1`) determining how many unit cells to stack along each crystallographic axis. Decimal values build a partial supercell: `1.5` adds half of the next cell and `0.5` shows only half of the unit cell (atoms beyond the fractional boundary are cropped). Each axis also has `+1` / `-1` / `+0.1` / `-0.1` quick-step buttons.
+*   **Repetitions ($a$, $b$, $c$)**: Spinboxes (range 0.1 to 8, default `1`) determining how many unit cells to stack along each crystallographic axis. Decimal values build a partial supercell as a geometric slab of real space: `1.5` shows one and a half cells and `0.5` shows half of the cell, with atoms clipped flush at both faces of the slab (a molecule straddling a face is cut). Each axis also has `+1` / `-1` / `+0.1` / `-0.1` quick-step buttons.
 *   **Keep Molecules Connected Checkbox**: When checked, the generator automatically detects molecules split across unit cell boundaries and completes them. This prevents fragments from floating detached in space.
 *   **Show Bonds Checkbox**: Controls whether inferred inter-atomic bonds are rendered in the 3D view.
 *   **Show Hydrogen Atoms Checkbox**: Controls the rendering of hydrogen atoms (default `True`). Unchecking this filters out hydrogen atoms, significantly speeding up rendering for large organic framework structures.

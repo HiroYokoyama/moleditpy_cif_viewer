@@ -49,6 +49,25 @@ C2 C 0.05 0 0
 """
 
 
+CHAIN_CIF = """
+data_chain
+_cell_length_a 10
+_cell_length_b 10
+_cell_length_c 10
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+C1 C 0.05 0 0
+C2 C 0.95 0 0
+"""
+
+
 def test_parse_number_removes_uncertainty():
     assert parse_cif_number("5.6402(2)") == 5.6402
 
@@ -126,27 +145,33 @@ def test_expand_supercell_integer_repeats_do_not_crop_unwrapped_molecules():
     np.testing.assert_allclose(atoms[1].position, [10.5, 0.0, 0.0])
 
 
-def test_expand_supercell_fractional_repeats_keep_boundary_molecules_connected():
+def test_expand_supercell_decimal_does_not_extend_behind_origin():
+    # A chain that unwraps a bond partner to a negative fractional coord must
+    # not be drawn behind the origin: the geometric slab clips both faces.
+    structure = parse_cif(CHAIN_CIF)
+    atoms, _ = expand_supercell(structure, (1.5, 1, 1), keep_connected=True)
+
+    xs = [atom.position[0] for atom in atoms]
+    assert min(xs) >= -1e-6  # nothing pokes out the back of the cell
+    assert max(xs) <= 15.0 + 1e-6  # 1.5 cells of a 10 A axis
+
+
+def test_expand_supercell_decimal_slabs_connected_chain_by_drawn_position():
+    # BOUNDARY_CIF unwraps to fract 0.95 / 1.05 with keep_connected.
     structure = parse_cif(BOUNDARY_CIF)
 
-    # Cropping must use the original wrapped coords (0.95, 0.05), not the
-    # unwrap-shifted ones (0.95, 1.05), so a near-integer repeat does not
-    # silently drop the unwrapped bond partner.
-    for repeat_a in (0.99, 1.01):
-        atoms, bonds = expand_supercell(
-            structure, (repeat_a, 1, 1), keep_connected=True
-        )
-        assert len(atoms) == 2
-        assert bonds == [(0, 1)]
-        np.testing.assert_allclose(atoms[1].position, [10.5, 0.0, 0.0])
+    # 1.01 cells: the partner drawn at 1.05 is outside the slab and trimmed.
+    atoms, bonds = expand_supercell(structure, (1.01, 1, 1), keep_connected=True)
+    assert [atom.label for atom in atoms] == ["C1"]
+    assert bonds == []
 
+    # A 0.5 slab of the *drawn* structure contains neither unwrapped atom...
+    atoms_half, _ = expand_supercell(structure, (0.5, 1, 1), keep_connected=True)
+    assert atoms_half == []
 
-def test_expand_supercell_sub_cell_crops_by_wrapped_position():
-    structure = parse_cif(BOUNDARY_CIF)
-    atoms, _ = expand_supercell(structure, (0.5, 1, 1), keep_connected=True)
-
-    # C1 (fract 0.95) lies outside the half cell; C2 (fract 0.05) stays
-    assert [atom.label for atom in atoms] == ["C2"]
+    # ...but with wrapped coords the in-cell C2 (fract 0.05) sits in the slab.
+    atoms_wrapped, _ = expand_supercell(structure, (0.5, 1, 1), keep_connected=False)
+    assert [atom.label for atom in atoms_wrapped] == ["C2"]
 
 
 def test_supercell_edges_fractional_repeats():
@@ -230,14 +255,14 @@ def test_write_supercell_cif_fractional_repeats(tmp_path):
     np.testing.assert_allclose(frac_xs, [0.0, 0.5 / 1.4, 1.0 / 1.4], atol=1e-5)
 
 
-def test_write_supercell_cif_fractional_keeps_connected_boundary_atoms(tmp_path):
+def test_write_supercell_cif_fractional_slabs_connected_chain(tmp_path):
     structure = parse_cif(BOUNDARY_CIF)
     export_path = tmp_path / "supercell_frac_connected.cif"
     write_supercell_cif(str(export_path), structure, (0.99, 1, 1), keep_connected=True)
 
     exported_struct = parse_cif(export_path.read_text(encoding="utf-8"))
-    # The unwrap-shifted bond partner (C2 at shifted fract 1.05) must survive
-    assert len(exported_struct.atoms) == 2
+    # C2 is drawn at fract 1.05 (unwrapped), outside the 0.99 slab, so trimmed
+    assert len(exported_struct.atoms) == 1
 
 
 def test_write_cif_no_cell(tmp_path):

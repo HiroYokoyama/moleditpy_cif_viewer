@@ -966,9 +966,6 @@ def expand_supercell(
     base_atoms = (
         unwrap_connected_atoms(structure) if keep_connected else list(structure.atoms)
     )
-    # Crop against the wrapped (original) coordinates: unwrap shifts applied for
-    # connectivity must not push boundary atoms out of a partial supercell.
-    crop_fracts = [np.asarray(atom.fract, dtype=float) for atom in structure.atoms]
 
     for ia in range(repeat_a):
         for ib in range(repeat_b):
@@ -977,9 +974,13 @@ def expand_supercell(
                 cart_offset = offset @ structure.lattice
                 for base_index, atom in enumerate(base_atoms):
                     if crop_axes:
-                        fract = crop_fracts[base_index] + offset
+                        # Geometric slab on the *drawn* (possibly unwrapped)
+                        # position: both bounds so a connected chain does not
+                        # protrude past either face of a partial cell.
+                        fract = np.asarray(atom.fract, dtype=float) + offset
                         if any(
-                            fract[axis] > repeat_vals[axis] + 1e-6
+                            fract[axis] < -1e-6
+                            or fract[axis] > repeat_vals[axis] + 1e-6
                             for axis in crop_axes
                         ):
                             continue
@@ -1936,14 +1937,11 @@ def write_supercell_cif(
         if (keep_connected and has_cell)
         else list(structure.atoms)
     )
-    # Pair each (possibly unwrap-shifted) atom with its original wrapped
-    # coordinates so partial-cell cropping ignores connectivity shifts.
-    base_entries = list(zip(base_atoms, structure.atoms))
 
     if selected_disorder_key is not None:
-        base_entries = [
-            (atom, orig)
-            for atom, orig in base_entries
+        base_atoms = [
+            atom
+            for atom in base_atoms
             if atom.disorder_group is None
             or atom.disorder_group == selected_disorder_key
             or atom.disorder_key == selected_disorder_key
@@ -2004,11 +2002,12 @@ def write_supercell_cif(
         for ib in range(repeat_b):
             for ic in range(repeat_c):
                 offset = np.array([ia, ib, ic], dtype=float)
-                for base_index, (atom, orig) in enumerate(base_entries):
+                for base_index, atom in enumerate(base_atoms):
                     if crop_axes and has_cell:
-                        fract = np.asarray(orig.fract, dtype=float) + offset
+                        fract = np.asarray(atom.fract, dtype=float) + offset
                         if any(
-                            fract[axis] > repeat_vals[axis] + 1e-6
+                            fract[axis] < -1e-6
+                            or fract[axis] > repeat_vals[axis] + 1e-6
                             for axis in crop_axes
                         ):
                             continue
