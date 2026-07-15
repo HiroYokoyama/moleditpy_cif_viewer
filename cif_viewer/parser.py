@@ -935,13 +935,33 @@ def fractional_to_cartesian(fract: Sequence[float], lattice: np.ndarray) -> np.n
     return np.asarray(fract, dtype=float) @ lattice
 
 
+def normalize_repeats(repeats: Sequence[float]) -> Tuple[float, float, float]:
+    """Clamp supercell repeats to a sane positive range, allowing decimals."""
+    return tuple(min(50.0, max(0.05, float(value))) for value in repeats)
+
+
+def _repeat_cell_counts(repeat_vals: Sequence[float]) -> Tuple[int, int, int]:
+    return tuple(max(1, int(math.ceil(value - 1e-9))) for value in repeat_vals)
+
+
+def _fractional_axes(repeat_vals: Sequence[float]) -> Tuple[int, ...]:
+    """Axes where the repeat count is non-integer and needs atom cropping."""
+    return tuple(
+        axis
+        for axis, value in enumerate(repeat_vals)
+        if abs(value - round(value)) > 1e-9
+    )
+
+
 def expand_supercell(
     structure: CifStructure,
-    repeats: Sequence[int],
+    repeats: Sequence[float],
     keep_connected: bool = True,
     tolerance: float = 0.45,
 ) -> Tuple[List[RenderAtom], List[Tuple[int, int]]]:
-    repeat_a, repeat_b, repeat_c = [max(1, int(value)) for value in repeats]
+    repeat_vals = normalize_repeats(repeats)
+    repeat_a, repeat_b, repeat_c = _repeat_cell_counts(repeat_vals)
+    crop_axes = _fractional_axes(repeat_vals)
     atoms: List[RenderAtom] = []
     base_atoms = (
         unwrap_connected_atoms(structure) if keep_connected else list(structure.atoms)
@@ -953,6 +973,13 @@ def expand_supercell(
                 offset = np.array([ia, ib, ic], dtype=float)
                 cart_offset = offset @ structure.lattice
                 for base_index, atom in enumerate(base_atoms):
+                    if crop_axes:
+                        fract = np.asarray(atom.fract, dtype=float) + offset
+                        if any(
+                            fract[axis] > repeat_vals[axis] + 1e-6
+                            for axis in crop_axes
+                        ):
+                            continue
                     u_cart_atom = getattr(atom, "u_cart", None)
 
                     atoms.append(
@@ -1396,9 +1423,9 @@ def unwrap_connected_atoms(structure: CifStructure) -> List[CifAtom]:
 
 
 def supercell_edges(
-    lattice: np.ndarray, repeats: Sequence[int]
+    lattice: np.ndarray, repeats: Sequence[float]
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    repeat = np.asarray([max(1, int(value)) for value in repeats], dtype=float)
+    repeat = np.asarray(normalize_repeats(repeats), dtype=float)
     scaled = lattice * repeat[:, None]
     corners = [
         np.array([ia, ib, ic], dtype=float) @ scaled
@@ -1887,7 +1914,7 @@ _COVALENT_RADII = {
 def write_supercell_cif(
     path: str,
     structure: CifStructure,
-    repeats: Tuple[int, int, int],
+    repeats: Tuple[float, float, float],
     keep_connected: bool = True,
     selected_disorder_key: Optional[str] = None,
 ) -> None:
@@ -1898,7 +1925,9 @@ def write_supercell_cif(
         and structure.lattice is not None
     )
 
-    repeat_a, repeat_b, repeat_c = repeats
+    repeat_vals = normalize_repeats(repeats)
+    repeat_a, repeat_b, repeat_c = _repeat_cell_counts(repeat_vals)
+    crop_axes = _fractional_axes(repeat_vals)
     base_atoms = (
         unwrap_connected_atoms(structure)
         if (keep_connected and has_cell)
@@ -1922,9 +1951,9 @@ def write_supercell_cif(
     ]
 
     if has_cell:
-        new_a = structure.cell_lengths[0] * repeat_a
-        new_b = structure.cell_lengths[1] * repeat_b
-        new_c = structure.cell_lengths[2] * repeat_c
+        new_a = structure.cell_lengths[0] * repeat_vals[0]
+        new_b = structure.cell_lengths[1] * repeat_vals[1]
+        new_c = structure.cell_lengths[2] * repeat_vals[2]
         alpha, beta, gamma = structure.cell_angles
 
         lines.extend(
@@ -1970,13 +1999,20 @@ def write_supercell_cif(
             for ic in range(repeat_c):
                 offset = np.array([ia, ib, ic], dtype=float)
                 for base_index, atom in enumerate(base_atoms):
+                    if crop_axes and has_cell:
+                        fract = np.asarray(atom.fract, dtype=float) + offset
+                        if any(
+                            fract[axis] > repeat_vals[axis] + 1e-6
+                            for axis in crop_axes
+                        ):
+                            continue
                     clean_label = re.sub(r"[^a-zA-Z0-9]", "", atom.label)
                     label = f"{clean_label}_{ia}_{ib}_{ic}"
                     occ = atom.occupancy if atom.occupancy is not None else 1.0
 
                     if has_cell:
                         frac_super = (atom.fract + offset) / np.array(
-                            repeats, dtype=float
+                            repeat_vals, dtype=float
                         )
                         lines.append(
                             f"{label:<12} {atom.element:<3} {frac_super[0]:.6f} {frac_super[1]:.6f} {frac_super[2]:.6f} {occ:.4f}"

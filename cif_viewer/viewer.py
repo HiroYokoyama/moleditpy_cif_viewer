@@ -654,9 +654,9 @@ class CifViewerWidget(QWidget):
         self.repeat_a = self._repeat_spin()
         self.repeat_b = self._repeat_spin()
         self.repeat_c = self._repeat_spin()
-        supercell_layout.addRow("a repeats", self.repeat_a)
-        supercell_layout.addRow("b repeats", self.repeat_b)
-        supercell_layout.addRow("c repeats", self.repeat_c)
+        supercell_layout.addRow("a repeats", self._repeat_row(self.repeat_a))
+        supercell_layout.addRow("b repeats", self._repeat_row(self.repeat_b))
+        supercell_layout.addRow("c repeats", self._repeat_row(self.repeat_c))
 
         self.keep_connected = QCheckBox("Keep molecules connected")
         self.keep_connected.setChecked(True)
@@ -885,10 +885,33 @@ class CifViewerWidget(QWidget):
         pass  # mode switching is driven by preset buttons and spinners, not tab selection
 
     def _repeat_spin(self):
-        spin = QSpinBox()
-        spin.setRange(1, 8)
-        spin.setValue(1)
+        spin = QDoubleSpinBox()
+        spin.setRange(0.1, 8.0)
+        spin.setDecimals(2)
+        spin.setSingleStep(0.1)
+        spin.setValue(1.0)
+        spin.setToolTip(
+            "Number of cell repeats along this axis. Decimal values build a "
+            "partial supercell: 1.5 adds half of the next cell, 0.5 shows "
+            "half of the unit cell."
+        )
         return spin
+
+    def _repeat_row(self, spin):
+        """Wrap a repeat spinbox with +1 / -1 / +0.1 / -0.1 step buttons."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(spin, 1)
+        for text, delta in (("+1", 1.0), ("-1", -1.0), ("+0.1", 0.1), ("-0.1", -0.1)):
+            btn = QPushButton(text)
+            btn.setFixedWidth(40)
+            btn.clicked.connect(
+                lambda _checked=False, s=spin, d=delta: s.setValue(
+                    round(s.value() + d, 2)
+                )
+            )
+            row.addWidget(btn)
+        return row
 
     def _on_supercell_spin_changed(self):
         """Switch to Packing mode and render (called by Apply button or presets)."""
@@ -1775,7 +1798,7 @@ class CifViewerWidget(QWidget):
         summary_text = (
             f"{len(self.structure.atoms)} completed unit-cell atoms, "
             f"{len(last_rendered_atoms)} rendered atoms, {len(bonds)} inferred bonds, "
-            f"supercell {repeats[0]} x {repeats[1]} x {repeats[2]}."
+            f"supercell {repeats[0]:g} x {repeats[1]:g} x {repeats[2]:g}."
         )
         max_atoms = self.max_atoms_spin.value()
         if (

@@ -90,6 +90,49 @@ def test_expand_supercell_can_leave_atoms_inside_cell():
     np.testing.assert_allclose(atoms[1].position, [0.5, 0.0, 0.0])
 
 
+def test_expand_supercell_fractional_repeats_crop_atoms():
+    structure = parse_cif(NACL_CIF)
+    atoms, bonds = expand_supercell(structure, (1.4, 1, 1), keep_connected=False)
+
+    # Second cell is built partially: Na at fract 1.0 stays, Cl at 1.5 is cropped
+    assert len(atoms) == 3
+    assert bonds == []
+    assert [atom.element for atom in atoms] == ["Na", "Cl", "Na"]
+    np.testing.assert_allclose(atoms[2].position, [5.6402, 0.0, 0.0])
+
+
+def test_expand_supercell_fractional_boundary_is_inclusive():
+    structure = parse_cif(NACL_CIF)
+    atoms, _ = expand_supercell(structure, (1.5, 1, 1), keep_connected=False)
+
+    # Cl of the second image sits exactly at fract 1.5 and is kept
+    assert len(atoms) == 4
+
+
+def test_expand_supercell_sub_cell_repeats_show_partial_cell():
+    structure = parse_cif(NACL_CIF)
+    atoms, _ = expand_supercell(structure, (0.4, 1, 1), keep_connected=False)
+
+    # Half-cell view along a: Cl at fract 0.5 is outside the 0.4 slab
+    assert [atom.element for atom in atoms] == ["Na"]
+
+
+def test_expand_supercell_integer_repeats_do_not_crop_unwrapped_molecules():
+    structure = parse_cif(BOUNDARY_CIF)
+    atoms, bonds = expand_supercell(structure, (1.0, 1, 1))
+
+    # Float-typed but integer-valued repeats keep the old keep-connected behavior
+    assert bonds == [(0, 1)]
+    np.testing.assert_allclose(atoms[1].position, [10.5, 0.0, 0.0])
+
+
+def test_supercell_edges_fractional_repeats():
+    structure = parse_cif(NACL_CIF)
+    edges = supercell_edges(structure.lattice, (1.5, 1, 1))
+
+    assert any(np.allclose(end - start, [8.4603, 0.0, 0.0]) for start, end in edges)
+
+
 def test_supercell_edges_scale_lattice():
     structure = parse_cif(NACL_CIF)
     edges = supercell_edges(structure.lattice, (2, 1, 1))
@@ -149,6 +192,19 @@ def test_write_supercell_cif(tmp_path):
     # Check all fractional x coordinates: they should be 0.0, 0.25, 0.5, 0.75
     frac_xs = sorted(atom.fract[0] for atom in exported_struct.atoms)
     np.testing.assert_allclose(frac_xs, [0.0, 0.25, 0.5, 0.75])
+
+
+def test_write_supercell_cif_fractional_repeats(tmp_path):
+    structure = parse_cif(NACL_CIF)
+    export_path = tmp_path / "supercell_frac.cif"
+    write_supercell_cif(str(export_path), structure, (1.4, 1, 1), keep_connected=False)
+
+    exported_struct = parse_cif(export_path.read_text(encoding="utf-8"))
+    np.testing.assert_allclose(exported_struct.cell_lengths[0], 5.6402 * 1.4)
+    # Cl of the second image (fract 1.5 > 1.4) is cropped
+    assert len(exported_struct.atoms) == 3
+    frac_xs = sorted(atom.fract[0] for atom in exported_struct.atoms)
+    np.testing.assert_allclose(frac_xs, [0.0, 0.5 / 1.4, 1.0 / 1.4], atol=1e-5)
 
 
 def test_write_cif_no_cell(tmp_path):
