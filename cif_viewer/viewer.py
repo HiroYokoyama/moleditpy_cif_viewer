@@ -908,11 +908,12 @@ class CifViewerWidget(QWidget):
         return spin
 
     def _repeat_row(self, spin):
-        """Wrap a repeat spinbox with +1 / -1 / +0.1 / -0.1 step buttons."""
+        """Wrap a repeat spinbox with +1 / -1 / +0.5 / -0.5 step buttons
+        (the spinbox arrows already step by 0.1)."""
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(spin, 1)
-        for text, delta in (("+1", 1.0), ("-1", -1.0), ("+0.1", 0.1), ("-0.1", -0.1)):
+        for text, delta in (("+1", 1.0), ("-1", -1.0), ("+0.5", 0.5), ("-0.5", -0.5)):
             btn = QPushButton(text)
             btn.setFixedWidth(40)
             btn.clicked.connect(
