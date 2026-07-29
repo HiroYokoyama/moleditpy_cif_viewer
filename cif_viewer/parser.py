@@ -964,7 +964,9 @@ def expand_supercell(
     crop_axes = _fractional_axes(repeat_vals)
     atoms: List[RenderAtom] = []
     base_atoms = (
-        unwrap_connected_atoms(structure) if keep_connected else list(structure.atoms)
+        unwrap_connected_atoms(structure, tolerance)
+        if keep_connected
+        else list(structure.atoms)
     )
 
     for ia in range(repeat_a):
@@ -1034,7 +1036,7 @@ def get_space_group_operations(structure: CifStructure) -> list:
     return symops
 
 
-def _infer_periodic_adjacency(structure: CifStructure):
+def _infer_periodic_adjacency(structure: CifStructure, tolerance: float = 0.45):
     adjacency = {atom_index: [] for atom_index in range(len(structure.atoms))}
     lattice = structure.lattice
 
@@ -1047,12 +1049,10 @@ def _infer_periodic_adjacency(structure: CifStructure):
 
     for left_index in range(len(structure.atoms)):
         left_atom = structure.atoms[left_index]
-        left_radius = covalent_radius(left_atom.element)
 
         for right_index in range(left_index, len(structure.atoms)):
             right_atom = structure.atoms[right_index]
-            right_radius = covalent_radius(right_atom.element)
-            cutoff = min(2.45, left_radius + right_radius + 0.45)
+            cutoff = bond_cutoff(left_atom.element, right_atom.element, tolerance)
 
             if (
                 left_atom.disorder_key is not None
@@ -1158,7 +1158,7 @@ def is_polymer_structure(structure: CifStructure, tolerance: float = 0.45) -> bo
         structure.lattice,
         tuple(exp_atoms),
     )
-    adj = _infer_periodic_adjacency(tmp)
+    adj = _infer_periodic_adjacency(tmp, tolerance)
     N = len(exp_atoms)
     visited = [False] * N
 
@@ -1198,9 +1198,13 @@ def _expand_to_unit_cell(
 
     exp_atoms: List[CifAtom] = []
     is_asym: List[bool] = []
-    seen_fracs: List[np.ndarray] = []
 
     for atom in core_atoms:
+        # Scoped per source atom: the point is to collapse the symmetry images
+        # that coincide when an atom sits on a special position.  Sharing one
+        # list across atoms also deleted genuine co-located sites -- a mixed
+        # Fe/Co position lost the Co entirely.
+        seen_fracs: List[np.ndarray] = []
         if selected_disorder_key is not None and atom.disorder_group is not None:
             if (
                 atom.disorder_group != selected_disorder_key
@@ -1324,7 +1328,7 @@ def grow_molecules(
         structure.lattice,
         tuple(exp_atoms),
     )
-    adj = _infer_periodic_adjacency(tmp)
+    adj = _infer_periodic_adjacency(tmp, tolerance)
 
     # --- Step 3: BFS with offset tracking per molecule (= unwrap_connected_atoms) ---
     N = len(exp_atoms)
@@ -1386,8 +1390,10 @@ def grow_molecules(
     return final_atoms, final_bonds
 
 
-def unwrap_connected_atoms(structure: CifStructure) -> List[CifAtom]:
-    adjacency = _infer_periodic_adjacency(structure)
+def unwrap_connected_atoms(
+    structure: CifStructure, tolerance: float = 0.45
+) -> List[CifAtom]:
+    adjacency = _infer_periodic_adjacency(structure, tolerance)
     if not adjacency:
         return list(structure.atoms)
 
@@ -1541,7 +1547,9 @@ def infer_bonds(
         )
 
     bonds: List[Tuple[int, int]] = []
-    max_cutoff = max(2.45, 2.0 + tolerance)
+    # Bin size must cover the longest bond any pair here can form, otherwise
+    # a bond spanning two bins is never tested.
+    max_cutoff = _max_bond_cutoff((atom.element for atom in atoms), tolerance)
 
     positions = np.array([atom.position for atom in atoms])
     min_coords = np.min(positions, axis=0) - 1.0
@@ -1569,7 +1577,6 @@ def infer_bonds(
         for i in range(n_left):
             left = left_indices[i]
             left_atom = atoms[left]
-            left_radius = covalent_radius(left_atom.element)
             for j in range(i + 1, n_left):
                 right = left_indices[j]
                 right_atom = atoms[right]
@@ -1579,8 +1586,7 @@ def infer_bonds(
                 ):
                     if left_atom.disorder_key != right_atom.disorder_key:
                         continue
-                right_radius = covalent_radius(right_atom.element)
-                cutoff = min(max_cutoff, left_radius + right_radius + tolerance)
+                cutoff = bond_cutoff(left_atom.element, right_atom.element, tolerance)
                 dist_sq = np.sum((positions[left] - positions[right]) ** 2)
                 if 0.25 * 0.25 <= dist_sq <= cutoff * cutoff:
                     bonds.append((left, right))
@@ -1593,7 +1599,6 @@ def infer_bonds(
                 right_indices = bins[neigh_bin]
                 for left in left_indices:
                     left_atom = atoms[left]
-                    left_radius = covalent_radius(left_atom.element)
                     for right in right_indices:
                         if left >= right:
                             continue
@@ -1604,8 +1609,9 @@ def infer_bonds(
                         ):
                             if left_atom.disorder_key != right_atom.disorder_key:
                                 continue
-                        right_radius = covalent_radius(right_atom.element)
-                        cutoff = min(max_cutoff, left_radius + right_radius + tolerance)
+                        cutoff = bond_cutoff(
+                            left_atom.element, right_atom.element, tolerance
+                        )
                         dist_sq = np.sum((positions[left] - positions[right]) ** 2)
                         if 0.25 * 0.25 <= dist_sq <= cutoff * cutoff:
                             bonds.append((left, right))
@@ -1615,6 +1621,32 @@ def infer_bonds(
 
 def covalent_radius(element: str) -> float:
     return _COVALENT_RADII.get(normalize_element(element), 0.77)
+
+
+def bond_cutoff(
+    left_element: str, right_element: str, tolerance: float = 0.45
+) -> float:
+    """Maximum distance at which two elements are treated as bonded.
+
+    Deliberately uncapped: an earlier ``min(2.45, ...)`` ceiling silently
+    unbonded every heavy-element solid (Pb-I 3.17 A, Cd-Te 2.81 A, I-I
+    2.67 A), so a perovskite drew six bonds in supercell mode and none in
+    whole-molecule mode.  This matches the RDKit covFactor rule that
+    infer_bonds() already applies to the drawn bonds.
+    """
+    return covalent_radius(left_element) + covalent_radius(right_element) + tolerance
+
+
+def _max_bond_cutoff(elements: Iterable[str], tolerance: float = 0.45) -> float:
+    """Largest cutoff any pair of the given elements can produce.
+
+    Used as the voxel bin size, which must not be smaller than the longest
+    bond or neighbouring-bin pairs get missed.
+    """
+    radii = [covalent_radius(el) for el in elements]
+    if not radii:
+        return 2.45 + tolerance
+    return 2.0 * max(radii) + tolerance
 
 
 def normalize_element(value: str) -> str:
@@ -1912,6 +1944,22 @@ _COVALENT_RADII = {
     "Tl": 1.45,
     "Pb": 1.46,
     "Bi": 1.48,
+    "Po": 1.40,
+    "At": 1.50,
+    "Rn": 1.50,
+    "Fr": 2.60,
+    "Ra": 2.21,
+    "Ac": 2.15,
+    "Th": 2.06,
+    "Pa": 2.00,
+    "U": 1.96,
+    "Np": 1.90,
+    "Pu": 1.87,
+    "Am": 1.80,
+    "Cm": 1.69,
+    # Neutron-diffraction CIFs label deuterium "D"; without this it fell
+    # through to the 0.77 default and was sized like carbon.
+    "D": 0.31,
 }
 
 
