@@ -19,11 +19,13 @@ The algorithm proceeds in four steps:
 
 ### Step 1: Symmetry Expansion
 We apply all crystallographic symmetry operations to the asymmetric unit. Every resulting fractional coordinate is mathematically wrapped into the $[0, 1)$ range using modulo 1.0. This ensures all atoms are mathematically inside a single unit cell box.
-*Duplicates are removed using a fast spatial distance check.*
+*Duplicates are removed using a fast spatial distance check, scoped to each source atom.* The scoping matters: the check exists to collapse the symmetry images that coincide when an atom sits on a special position, so it must not compare two **different** atoms. Sharing one list across atoms would delete genuinely co-located sites — a mixed Fe/Co position would lose the Co.
 
 ### Step 2: Periodic Adjacency Inference
 We use RDKit to determine covalent bonds. Because atoms are wrapped inside the $[0, 1)$ box, two bonded atoms might appear to be on opposite sides of the cell (e.g., $x=0.01$ and $x=0.99$).
 To find these bonds, we calculate the **minimum image distance**. If the distance is within the covalent radius threshold, we record a bond along with the periodic **shift** vector required to traverse it (e.g., a shift of `[-1, 0, 0]`).
+
+The threshold is $r_1 + r_2 + \text{tolerance}$ (Cordero covalent radii, default tolerance 0.45 Å), with **no upper ceiling**. An earlier `min(2.45 Å, ...)` cap silently unbonded every heavy-element solid — Pb–I at 3.17 Å, Cd–Te at 2.81 Å, I–I at 2.67 Å — which in turn made the polymer test in Step 4 miss frameworks such as the halide perovskites entirely. The uncapped rule agrees with the `covFactor` rule RDKit already applies to the drawn bonds, so the two paths cannot disagree about whether a bond exists.
 
 ### Step 3: BFS Topological Unwrapping (The Core Engine)
 At this point, we have a graph where nodes are atoms inside the $[0,1)$ box, and edges are bonds that carry a periodic `shift`.
