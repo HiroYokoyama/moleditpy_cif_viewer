@@ -2,12 +2,11 @@
 
 Owns only this file; does not touch existing test modules.
 """
-import os
+
 import sys
 import types
 
 import numpy as np
-import pytest
 from rdkit import Chem
 
 from cif_viewer import EllipsoidWorkerThread, initialize
@@ -264,7 +263,9 @@ def test_hooked_draw_qtimer_schedule_failure_calls_overlays_directly(monkeypatch
 
     import PyQt6.QtCore as qtcore
 
-    monkeypatch.setattr(qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot))
+    monkeypatch.setattr(
+        qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
+    )
 
     class Mol:
         def HasProp(self, name):
@@ -312,7 +313,9 @@ def test_open_file_qtimer_schedule_failure_falls_back_to_direct_call(monkeypatch
 
     import PyQt6.QtCore as qtcore
 
-    monkeypatch.setattr(qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot))
+    monkeypatch.setattr(
+        qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
+    )
 
     file_opener = context.file_openers[0][1]
     result = file_opener("direct.cif")
@@ -414,7 +417,9 @@ def test_draw_ellipsoid_model_no_adp_falls_back_with_view_3d_manager(monkeypatch
     mw.view_3d_manager = FakeVM()
 
     context.register_window("cif_viewer_panel", _FakeDockWidget("CIF Viewer", None))
-    context.get_window("cif_viewer_panel").setWidget(types.SimpleNamespace(structure=None))
+    context.get_window("cif_viewer_panel").setWidget(
+        types.SimpleNamespace(structure=None)
+    )
 
     class Mol:
         def HasProp(self, name):
@@ -466,8 +471,13 @@ class _MockSpinBox:
 
 
 class _MockPlotter:
-    def __init__(self, camera_position=None, raise_on_camera_set=False,
-                 raise_on_reset_camera=False, has_reset_camera=True):
+    def __init__(
+        self,
+        camera_position=None,
+        raise_on_camera_set=False,
+        raise_on_reset_camera=False,
+        has_reset_camera=True,
+    ):
         self.cleared = False
         self.background = None
         self.lights = []
@@ -586,9 +596,7 @@ def test_draw_ellipsoid_model_probability_edge_values_return_default_scale(
     draw_callback, mol = _setup(monkeypatch, mw, widget)
 
     draw_callback(mw, mol)
-    assert any(
-        kw.get("name") == "cif_viewer_ellipsoids" for _, kw in mw.plotter.meshes
-    )
+    assert any(kw.get("name") == "cif_viewer_ellipsoids" for _, kw in mw.plotter.meshes)
 
 
 def test_draw_ellipsoid_model_probability_combo_paren_match(monkeypatch):
@@ -741,7 +749,9 @@ def test_draw_ellipsoid_model_non_testing_qtimer_failure_falls_back(monkeypatch)
     def bad_singleshot(ms, cb):
         raise RuntimeError("no loop")
 
-    monkeypatch.setattr(qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot))
+    monkeypatch.setattr(
+        qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
+    )
     draw_callback(mw, mol)
     assert mw.plotter.rendered is True
 
@@ -777,9 +787,7 @@ def test_draw_ellipsoid_model_negative_determinant_eigenvectors(monkeypatch):
     mol = _make_mol(["O"], [(0, 0, 0)])
     draw_callback, mol = _setup(monkeypatch, mw, widget, mol=mol)
     draw_callback(mw, mol)
-    assert any(
-        kw.get("name") == "cif_viewer_ellipsoids" for _, kw in mw.plotter.meshes
-    )
+    assert any(kw.get("name") == "cif_viewer_ellipsoids" for _, kw in mw.plotter.meshes)
 
 
 def test_draw_ellipsoid_model_bad_cov_shape_logged_and_skipped(monkeypatch, capsys):

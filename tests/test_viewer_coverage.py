@@ -2,11 +2,9 @@
 not exercised by tests/test_plugin_integration.py (packing/export edge cases,
 camera axis edge cases, settings error paths, thread run() body, etc.)."""
 
-import os
 import logging
 
 import numpy as np
-import pytest
 
 from cif_viewer.parser import CifStructure, CifAtom
 from cif_viewer.viewer import (
@@ -93,9 +91,7 @@ def _flat_structure(n=2):
         )
         for i in range(n)
     )
-    return CifStructure(
-        "flat", (10.0, 10.0, 10.0), (90.0, 90.0, 90.0), lattice, atoms
-    )
+    return CifStructure("flat", (10.0, 10.0, 10.0), (90.0, 90.0, 90.0), lattice, atoms)
 
 
 # ---------------------------------------------------------------------------
@@ -437,9 +433,7 @@ def test_view_from_axis_zero_direction_norm(qtbot):
     qtbot.addWidget(widget)
 
     class ZeroAStructure:
-        lattice = np.array(
-            [[0.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]]
-        )
+        lattice = np.array([[0.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]])
 
     widget.structure = ZeroAStructure()
     widget.view_from_axis("a")
@@ -453,9 +447,7 @@ def test_view_from_axis_zero_up_vector_uses_default(qtbot):
 
     class ZeroUpStructure:
         # For axis "a", view_up = lattice[2]; make it zero.
-        lattice = np.array(
-            [[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]]
-        )
+        lattice = np.array([[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]])
 
     widget.structure = ZeroUpStructure()
     widget.repeat_a.setValue(1)
@@ -689,7 +681,10 @@ def test_update_polymer_ui_exception_falls_back(qtbot, monkeypatch):
 
     monkeypatch.setattr("cif_viewer.viewer.is_polymer_structure", boom)
     widget._update_polymer_ui()
-    assert widget.polymer_warning_label.isHidden() or not widget.polymer_warning_label.isVisible()
+    assert (
+        widget.polymer_warning_label.isHidden()
+        or not widget.polymer_warning_label.isVisible()
+    )
     assert widget.radio_mol.isEnabled()
     assert widget._was_polymer is False
 
@@ -880,9 +875,7 @@ def test_load_cif_empty_structures_list(qtbot, monkeypatch, tmp_path):
     widget = CifViewerWidget(context=StubContext(FakePlotter()))
     qtbot.addWidget(widget)
 
-    monkeypatch.setattr(
-        "cif_viewer.viewer.parse_cif_file_pymatgen", lambda path: []
-    )
+    monkeypatch.setattr("cif_viewer.viewer.parse_cif_file_pymatgen", lambda path: [])
     criticals = []
     monkeypatch.setattr(
         "cif_viewer.viewer.QMessageBox.critical",
@@ -1045,7 +1038,6 @@ def test_render_now_sync_calculation_exception(qtbot, monkeypatch):
 def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypatch):
     """Covers the TypeError branch when on_cancel's disconnect() finds no
     connected slots left (e.g. a second/rapid cancel)."""
-    import os
     import time
     from rdkit import Chem
 
@@ -1174,7 +1166,9 @@ def test_on_render_data_ready_terminate_error_returns(qtbot):
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
     widget._on_render_data_ready([], [], None, "terminate requested", (1, 1, 1))
-    assert not hasattr(widget, "last_rendered_atoms") or widget.last_rendered_atoms == []
+    assert (
+        not hasattr(widget, "last_rendered_atoms") or widget.last_rendered_atoms == []
+    )
 
 
 def test_on_render_data_ready_error_with_atoms_shows_critical(qtbot, monkeypatch):

@@ -56,16 +56,12 @@ def test_extract_metadata_no_values_all_none():
 
 
 def test_extract_metadata_z_prime_calculated_integer():
-    meta = _extract_metadata(
-        _get_val({"_cell_formula_units_z": "4"}), num_symops=4
-    )
+    meta = _extract_metadata(_get_val({"_cell_formula_units_z": "4"}), num_symops=4)
     assert meta["z_prime"] == "1"
 
 
 def test_extract_metadata_z_prime_calculated_fractional():
-    meta = _extract_metadata(
-        _get_val({"_cell_formula_units_z": "3"}), num_symops=4
-    )
+    meta = _extract_metadata(_get_val({"_cell_formula_units_z": "3"}), num_symops=4)
     assert meta["z_prime"] == "0.75"
 
 
@@ -105,9 +101,7 @@ def _flat_structure(n=2, disorder_group=None):
         )
         for i in range(n)
     )
-    return CifStructure(
-        "flat", (10.0, 10.0, 10.0), (90.0, 90.0, 90.0), lattice, atoms
-    )
+    return CifStructure("flat", (10.0, 10.0, 10.0), (90.0, 90.0, 90.0), lattice, atoms)
 
 
 def test_is_polymer_structure_no_core_atoms_returns_false():
@@ -131,9 +125,7 @@ def test_expand_to_unit_cell_filters_by_disorder_key():
         struct.lattice,
         struct.atoms + (other_atom,),
     )
-    exp_atoms, _ = _expand_to_unit_cell(
-        struct, struct.atoms, selected_disorder_key="1"
-    )
+    exp_atoms, _ = _expand_to_unit_cell(struct, struct.atoms, selected_disorder_key="1")
     assert all(a.disorder_group in (None, "1") for a in exp_atoms)
     assert any(a.label == "C0" for a in exp_atoms)
     assert not any(a.label == "C2" and a.disorder_group == "2" for a in exp_atoms)
