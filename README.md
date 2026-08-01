@@ -3,7 +3,8 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20725848.svg)](https://doi.org/10.5281/zenodo.20725848)
 [![CI](https://github.com/HiroYokoyama/moleditpy_cif_viewer/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/actions/workflows/test.yml)
 ![Test Coverage](https://img.shields.io/badge/coverage->90%25-green)
-[![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_cif_viewer/total)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/releases)
+[![GitHub tag](https://img.shields.io/github/v/tag/HiroYokoyama/moleditpy_cif_viewer?label=version)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/tags)
+[![GitHub Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_cif_viewer/total)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/releases)
 
 > [!WARNING]
 > The CIF (Crystallographic Information File) format is highly complex and has many variations. Therefore, parsing may contain bugs or compatibility issues. Please verify the results carefully for critical applications. For publication, it is recommended to use specialized software such as Mercury or Olex2.
@@ -13,7 +14,6 @@ A crystal structure viewer plugin for [MoleditPy](https://github.com/HiroYokoyam
 This plugin allows researchers and developers to load CIF files, generate supercells, customize rendering styles, view along crystallographic axes, and display anisotropic displacement parameters (Thermal Ellipsoids) with extensive styling options.
 
 ![](img/ptfe.png)
-[![GitHub tag](https://img.shields.io/github/v/tag/HiroYokoyama/moleditpy_cif_viewer?label=version)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/tags)
 ---
 
 ## Table of Contents
