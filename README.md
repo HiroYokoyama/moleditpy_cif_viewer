@@ -13,6 +13,7 @@ A crystal structure viewer plugin for [MoleditPy](https://github.com/HiroYokoyam
 This plugin allows researchers and developers to load CIF files, generate supercells, customize rendering styles, view along crystallographic axes, and display anisotropic displacement parameters (Thermal Ellipsoids) with extensive styling options.
 
 ![](img/ptfe.png)
+[![GitHub tag](https://img.shields.io/github/v/tag/HiroYokoyama/moleditpy_cif_viewer?label=version)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/tags)
 ---
 
 ## Table of Contents
