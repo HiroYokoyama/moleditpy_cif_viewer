@@ -6,6 +6,8 @@
 [![GitHub tag](https://img.shields.io/github/v/tag/HiroYokoyama/moleditpy_cif_viewer?label=version)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/tags)
 [![GitHub Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_cif_viewer/total)](https://github.com/HiroYokoyama/moleditpy_cif_viewer/releases)
 
+Repo: [https://github.com/HiroYokoyama/moleditpy_cif_viewer/](https://github.com/HiroYokoyama/moleditpy_cif_viewer/)
+
 > [!WARNING]
 > The CIF (Crystallographic Information File) format is highly complex and has many variations. Therefore, parsing may contain bugs or compatibility issues. Please verify the results carefully for critical applications. For publication, it is recommended to use specialized software such as Mercury or Olex2.
 
