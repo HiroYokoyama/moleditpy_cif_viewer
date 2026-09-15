@@ -1482,6 +1482,9 @@ class CifViewerWidget(QWidget):
                 "pymatgen parser failed, falling back to built-in parser: %s",
                 e_pymatgen,
             )
+            self.all_structures = []
+
+        if not self.all_structures:
             try:
                 self.all_structures = [parse_cif_file(path)]
             except Exception as exc:

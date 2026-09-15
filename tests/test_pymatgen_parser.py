@@ -143,3 +143,55 @@ C1 0.05 0.01 0.01 0.0 0.0 0.0
 
     finally:
         os.remove(temp_path)
+
+
+def test_embedded_fcf_data_block_does_not_hide_the_structure():
+    """Olex2 puts a whole FCF (with its own ``data_`` line) inside a text field."""
+    from cif_viewer.parser import _mask_embedded_data_blocks
+
+    cif_content = """data_expt
+_cell_length_a 5.0
+_cell_length_b 5.0
+_cell_length_c 5.0
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_symmetry_space_group_name_H-M 'P 1'
+
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+C1 C 0.0 0.0 0.0 1.0
+O1 O 0.5 0.5 0.5 1.0
+
+_iucr_refine_fcf_details
+;
+data_expt
+_shelx_refln_list_code 4
+loop_
+_refln_index_h
+_refln_index_k
+_refln_index_l
+_refln_F_squared_calc
+1 0 0 100.00
+;
+"""
+
+    assert "\n.data_expt" in _mask_embedded_data_blocks(cif_content)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".cif", delete=False, encoding="utf-8"
+    ) as fh:
+        fh.write(cif_content)
+        temp_path = fh.name
+
+    try:
+        structures = parse_cif_file_pymatgen(temp_path)
+        assert len(structures) == 1
+        assert sorted(a.element for a in structures[0].atoms) == ["C", "O"]
+    finally:
+        os.remove(temp_path)

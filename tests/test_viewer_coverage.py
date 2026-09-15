@@ -876,6 +876,11 @@ def test_load_cif_empty_structures_list(qtbot, monkeypatch, tmp_path):
     qtbot.addWidget(widget)
 
     monkeypatch.setattr("cif_viewer.viewer.parse_cif_file_pymatgen", lambda path: [])
+
+    def _boom(path):
+        raise ValueError("unparsable")
+
+    monkeypatch.setattr("cif_viewer.viewer.parse_cif_file", _boom)
     criticals = []
     monkeypatch.setattr(
         "cif_viewer.viewer.QMessageBox.critical",
@@ -883,6 +888,27 @@ def test_load_cif_empty_structures_list(qtbot, monkeypatch, tmp_path):
     )
     widget.load_cif(str(cif_file))
     assert criticals
+
+
+def test_load_cif_empty_pymatgen_result_falls_back_to_builtin(
+    qtbot, monkeypatch, tmp_path
+):
+    cif_file = tmp_path / "fallback.cif"
+    cif_file.write_text(SIMPLE_CIF, encoding="utf-8")
+
+    widget = CifViewerWidget(context=StubContext(FakePlotter()))
+    qtbot.addWidget(widget)
+
+    monkeypatch.setattr("cif_viewer.viewer.parse_cif_file_pymatgen", lambda path: [])
+    criticals = []
+    monkeypatch.setattr(
+        "cif_viewer.viewer.QMessageBox.critical",
+        lambda *a, **k: criticals.append(a),
+    )
+    widget.load_cif(str(cif_file))
+    assert not criticals
+    assert len(widget.all_structures) == 1
+    assert widget.all_structures[0].atoms
 
 
 def test_load_cif_updates_init_manager_path(qtbot, tmp_path):

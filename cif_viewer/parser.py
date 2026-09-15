@@ -358,6 +358,29 @@ def _parse_asymmetric_atoms(
     return atoms
 
 
+def _mask_embedded_data_blocks(text: str) -> str:
+    r"""Neutralise ``data_`` lines that live inside a ``;``-delimited text field.
+
+    Olex2 embeds a whole FCF -- which begins with its own ``data_<name>`` line
+    -- inside ``_iucr_refine_fcf_details``.  pymatgen splits the raw file on
+    ``^\s*data_`` before it interprets semicolon text fields, so the real block
+    is cut in half and the reflection-only remainder overwrites it under the
+    same header, leaving no ``_atom_site_label``.
+    """
+    out = text.splitlines(keepends=True)
+    in_text_field = False
+    changed = False
+    for i, line in enumerate(out):
+        stripped = line.lstrip()
+        if stripped.startswith(";"):
+            in_text_field = not in_text_field
+            continue
+        if in_text_field and stripped.startswith("data_"):
+            out[i] = "." + line
+            changed = True
+    return "".join(out) if changed else text
+
+
 def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
     from pymatgen.io.cif import CifParser
 
@@ -374,7 +397,13 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
             module="monty",
         )
 
-        parser = CifParser(path)
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            raw_text = fh.read()
+        safe_text = _mask_embedded_data_blocks(raw_text)
+        if safe_text is raw_text:
+            parser = CifParser(path)
+        else:
+            parser = CifParser.from_str(safe_text)
         structures = []
 
         for name, block in parser._cif.data.items():
