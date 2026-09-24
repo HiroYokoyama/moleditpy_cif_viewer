@@ -1763,11 +1763,16 @@ class CifViewerWidget(QWidget):
 
     def _on_render_data_ready(self, last_rendered_atoms, bonds, mol, err_msg, repeats):
         if err_msg:
-            if "terminate" in err_msg or not last_rendered_atoms:
-                return
-            QMessageBox.critical(
-                self, "CIF Viewer", f"Could not build RDKit view:\n{err_msg}"
-            )
+            # A failed render always arrives with no atoms, so the old
+            # "no atoms -> return" guard dropped every error without a word
+            # and left the previous structure on screen unexplained.  Say so
+            # in the summary line; a modal box would interrupt every retry.
+            logging.error("CIF Viewer render failed: %s", err_msg)
+            if "terminate" not in err_msg:
+                lines = str(err_msg).strip().splitlines()
+                self.summary_label.setText(
+                    "Could not build the view: " + (lines[0] if lines else "unknown error")
+                )
             return
 
         self.last_rendered_atoms = last_rendered_atoms

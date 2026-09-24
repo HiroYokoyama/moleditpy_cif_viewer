@@ -80,3 +80,14 @@ It simply:
 Repeat counts may be non-integer (e.g. $1.5 \times 1 \times 1$). In that case the grid is tiled $\lceil n \rceil$ times along each axis, and afterwards a **geometric slab** is applied: along every *non-integer* axis, an atom is discarded unless its *drawn* fractional coordinate (i.e. its final position, including any "keep connected" unwrap shift, plus the cell-index offset) lies within $[0, n]$ (boundary-inclusive, $\varepsilon = 10^{-6}$). Cropping the drawn — not the wrapped — position, and clipping **both** faces, is what makes a partial cell render as a literal slab of real space: a connected chain never protrudes behind the origin or past the far face. A repeat below 1 (e.g. $0.5$) therefore renders half of the cell's real-space slab.
 
 Integer axes are never cropped (`crop_axes` is empty), so integer repeats — including the presets — reproduce the exact classic behavior and keep molecules whole. Only decimals slab space, which will slice through any molecule straddling a slab face; this is intentional and matches the "partial structure" semantics. Note that with "keep connected" on, unwrapping can shift an entire discrete molecule out of the $[0,1)$ box, so a sub-unit slab may legitimately contain none of it (turn "keep connected" off to slab the wrapped cell contents instead). The CIF exporter applies the same both-face slab and scales the exported cell lengths by the decimal repeat.
+
+## 5. Occupancy and Mixed Sites
+
+pymatgen stores a site's occupancy on its composition (`site.species`), not as an attribute of the site. Every parsed atom takes its occupancy from there, so a half-occupied disorder part or solvent keeps its 0.5.
+
+When two elements share one position (for example an Fe/Ni antisite with 0.3/0.7), pymatgen merges them into a single site. The viewer draws the element with the highest occupancy; on a tie it draws the one the label names. It also keeps the full list on `CifAtom.species`:
+
+- The powder-pattern simulation scatters from every element at its own occupancy.
+- The CIF exporter writes one line per element at the shared position, each with a unique label.
+
+With "All Parts" selected, disorder parts scatter at their refined occupancies. Choosing a single part scales that part up to full occupancy.

@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QProgressDialog
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "1.3.1"
+PLUGIN_VERSION = "1.4.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -21,6 +21,29 @@ PLUGIN_DEPENDENCIES = ["numpy", "pymatgen", "PyQt6", "pyvista", "rdkit"]
 PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=4.0.0, <5.0.0"
 
 WINDOW_ID = "cif_viewer_panel"
+
+_NO_ATTR = object()
+
+
+def atom_covariance(atom, structure):
+    """The displacement tensor drawn for one rendered atom, or None.
+
+    A rendered atom always carries its own ``u_cart`` (None when the atom was
+    refined isotropically).  Looking it up again in ``structure.u_cart`` by
+    ``base_index`` is only meaningful for objects that carry no ``u_cart`` at
+    all: in the Whole Molecule and Asymmetric Unit views ``base_index`` counts
+    symmetry-expanded asymmetric-unit atoms, not the unit-cell sites that
+    ``structure.u_cart`` is indexed by, so an isotropic atom used to borrow
+    the ellipsoid of an unrelated atom.
+    """
+    cov = getattr(atom, "u_cart", _NO_ATTR)
+    if cov is not _NO_ATTR:
+        return cov
+    u_cart = getattr(structure, "u_cart", None)
+    base_idx = getattr(atom, "base_index", None)
+    if u_cart is not None and base_idx is not None and base_idx < len(u_cart):
+        return u_cart[base_idx]
+    return None
 
 
 class EllipsoidWorkerThread(QThread):
@@ -495,14 +518,7 @@ def initialize(context):
             if index >= mol.GetNumAtoms():
                 continue
             symbol = atom.element
-            base_idx = atom.base_index
-            cov = getattr(atom, "u_cart", None)
-            if (
-                cov is None
-                and widget.structure.u_cart is not None
-                and base_idx < len(widget.structure.u_cart)
-            ):
-                cov = widget.structure.u_cart[base_idx]
+            cov = atom_covariance(atom, widget.structure)
 
             has_cov = cov is not None and not np.allclose(cov, 0.0)
             if (
@@ -722,7 +738,7 @@ def initialize(context):
                             (index, radii, eigenvectors, pos)
                         )
                     except Exception as exc:
-                        print(f"Error drawing ellipsoid for {symbol}: {exc}")
+                        logging.warning("draw ellipsoid for %s: %s", symbol, exc)
                 else:
                     if symbol == "H":
                         h_vdw = 1.2

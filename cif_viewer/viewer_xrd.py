@@ -30,6 +30,21 @@ from pymatgen.analysis.diffraction.xrd import XRDCalculator
 from pymatgen.core import Structure
 
 
+def _site_composition(atom, selected_disorder_key: str | None = None) -> dict:
+    """Scattering composition of one site: every element of a mixed site."""
+    mixed = getattr(atom, "species", None)
+    if mixed:
+        composition: dict = {}
+        for element, occ in mixed:
+            composition[element] = composition.get(element, 0.0) + float(occ)
+        return composition
+    occ = atom.occupancy if atom.occupancy is not None else 1.0
+    if selected_disorder_key is not None and atom.disorder_group is not None:
+        # One disorder part chosen: it stands for the whole site.
+        occ = 1.0
+    return {atom.element: occ}
+
+
 def make_pymatgen_structure(
     cif_structure, selected_disorder_key: str | None = None
 ) -> Structure:
@@ -65,10 +80,7 @@ def make_pymatgen_structure(
     if symops:
         # Generate full unit cell by applying symmetry operations
         for atom in base_atoms:
-            occ = atom.occupancy if atom.occupancy is not None else 1.0
-            if selected_disorder_key is not None and atom.disorder_group is not None:
-                occ = 1.0
-            element_dict = {atom.element: occ}
+            element_dict = _site_composition(atom, selected_disorder_key)
 
             for op in symops:
                 # Apply symmetry operation to fractional coordinates
@@ -92,10 +104,7 @@ def make_pymatgen_structure(
     else:
         # Just use the atoms directly (they are already conventional cell or we have no symmetry operations)
         for atom in base_atoms:
-            occ = atom.occupancy if atom.occupancy is not None else 1.0
-            if selected_disorder_key is not None and atom.disorder_group is not None:
-                occ = 1.0
-            species.append({atom.element: occ})
+            species.append(_site_composition(atom, selected_disorder_key))
             coords.append(atom.fract)
 
     return Structure(cif_structure.lattice, species, coords)

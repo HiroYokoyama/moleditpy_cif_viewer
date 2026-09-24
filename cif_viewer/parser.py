@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
-import shlex
 import logging
 import warnings
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -36,6 +35,9 @@ class CifAtom:
     disorder_group: Optional[str] = None
     disorder_assembly: Optional[str] = None
     u_cart: Optional[np.ndarray] = None
+    # Every (element, occupancy) of a mixed site such as Fe0.5Ni0.5; None for
+    # a site holding one element.  ``element`` stays the one drawn.
+    species: Optional[Tuple[Tuple[str, float], ...]] = None
 
     @property
     def disorder_key(self) -> Optional[str]:
@@ -407,6 +409,13 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
         structures = []
 
         for name, block in parser._cif.data.items():
+            if not any(
+                key.lower().startswith(("_atom_site_fract", "_atom_site_cartn"))
+                for key in block.data
+            ):
+                # A publication or global block: no structure, not an error.
+                logging.debug("CIF block %s holds no atom sites; skipped", name)
+                continue
             try:
                 struct = parser._get_structure(
                     block, primitive=False, symmetrized=False
@@ -756,6 +765,31 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
         return structures
 
 
+def _site_species(site, label) -> Tuple[str, float, Optional[Tuple[Tuple[str, float], ...]]]:
+    """Element drawn, its occupancy, and the full list for a mixed site.
+
+    pymatgen keeps the occupancy on the site's composition; sites have no
+    ``occupancy`` attribute, so reading one always gave 1.0 and a half-occupied
+    disorder part or solvent counted in full in the powder pattern.  Two
+    elements sharing a position are merged into one site, and only the first
+    was kept.
+    """
+    try:
+        items = [
+            (normalize_element(getattr(sp, "symbol", str(sp))), float(amount))
+            for sp, amount in site.species.items()
+        ]
+    except Exception as exc:  # pragma: no cover - unusual species objects
+        logging.debug("Could not read site composition: %s", exc)
+        items = []
+    if not items:
+        return normalize_element(site.species_string), 1.0, None
+    label_element = normalize_element(label)
+    # The most occupied element is drawn; on a tie, the one the label names.
+    element, occupancy = max(items, key=lambda item: (item[1], item[0] == label_element))
+    return element, occupancy, (tuple(items) if len(items) > 1 else None)
+
+
 def _structure_from_pymatgen(
     struct,
     name: str,
@@ -781,10 +815,9 @@ def _structure_from_pymatgen(
     atoms = []
     for i, site in enumerate(struct):
         label = getattr(site, "label", f"{site.species_string}{i + 1}")
-        element = normalize_element(site.species_string)
         fract = site.frac_coords
         cart = site.coords
-        occupancy = getattr(site, "occupancy", 1.0)
+        element, occupancy, species = _site_species(site, label)
 
         clean_lbl = str(label).strip().strip("'\"")
         g, a = label_to_disorder.get(clean_lbl, (None, None))
@@ -805,6 +838,7 @@ def _structure_from_pymatgen(
                 disorder_group=g,
                 disorder_assembly=a,
                 u_cart=u_cart_atom,
+                species=species,
             )
         )
 
@@ -1784,21 +1818,50 @@ def _logical_lines(text: str) -> Iterable[str]:
         yield stripped
 
 
+def _cif_tokens(line: str) -> Tuple[List[str], int]:
+    """Split a CIF line into values; also return where a comment starts.
+
+    In CIF a quote only opens a string at the start of a value and only closes
+    it when whitespace (or the end of the line) follows.  An apostrophe inside
+    a value is an ordinary character, which is how nucleotide and sugar labels
+    such as C1' and O5'' are written; a shell-style lexer read it as an
+    unterminated string and rejected the whole file.
+    """
+    tokens: List[str] = []
+    index = 0
+    length = len(line)
+    while index < length:
+        char = line[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char == "#":
+            return tokens, index
+        if char in "'\"":
+            end = index + 1
+            while end < length:
+                if line[end] == char and (end + 1 == length or line[end + 1].isspace()):
+                    break
+                end += 1
+            if end < length:
+                tokens.append(line[index + 1 : end])
+                index = end + 1
+                continue
+            # No closing quote: CIF 1.1 treats the rest as a bare value.
+        end = index
+        while end < length and not line[end].isspace():
+            end += 1
+        tokens.append(line[index:end])
+        index = end
+    return tokens, length
+
+
 def _strip_comment(line: str) -> str:
-    quote = None
-    for index, char in enumerate(line):
-        if char in {"'", '"'}:
-            quote = None if quote == char else char
-        elif char == "#" and quote is None:
-            return line[:index]
-    return line
+    return line[: _cif_tokens(line)[1]]
 
 
 def _split_cif_line(line: str) -> List[str]:
-    lexer = shlex.shlex(line, posix=True)
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
+    return _cif_tokens(line)[0]
 
 
 def _normalize_tag(tag: str) -> str:
@@ -1816,10 +1879,22 @@ def _required_float(tags: Dict[str, str], key: str) -> float:
 
 
 def _find_atom_loop(loops):
+    """The loop holding atom coordinates.
+
+    Matching any ``_atom_site.`` header is not enough: the anisotropic
+    displacement loop (``_atom_site_aniso_*``) shares the prefix, and a CIF
+    that lists it first lost every atom.
+    """
+    fallback = None
     for headers, rows in loops:
-        if any(header.startswith("_atom_site.") for header in headers):
+        if any(header in _FRACT_KEYS or header in _CART_KEYS for header in headers):
             return rows
-    return []
+        if fallback is None and any(
+            header.startswith("_atom_site.") and not header.startswith("_atom_site.aniso")
+            for header in headers
+        ):
+            fallback = rows
+    return fallback if fallback is not None else []
 
 
 def _atoms_from_loop(rows, lattice: np.ndarray) -> List[CifAtom]:
@@ -2089,22 +2164,26 @@ def write_supercell_cif(
                         ):
                             continue
                     clean_label = re.sub(r"[^a-zA-Z0-9]", "", atom.label)
-                    label = f"{clean_label}_{ia}_{ib}_{ic}"
                     occ = atom.occupancy if atom.occupancy is not None else 1.0
+                    # A mixed site (Fe0.5Ni0.5) is written as one line per
+                    # element at the same position, as the source CIF has it.
+                    entries = getattr(atom, "species", None) or ((atom.element, occ),)
 
                     if has_cell:
                         frac_super = (atom.fract + offset) / np.array(
                             repeat_vals, dtype=float
                         )
-                        lines.append(
-                            f"{label:<12} {atom.element:<3} {frac_super[0]:.6f} {frac_super[1]:.6f} {frac_super[2]:.6f} {occ:.4f}"
-                        )
+                        position = f"{frac_super[0]:.6f} {frac_super[1]:.6f} {frac_super[2]:.6f}"
                     else:
                         x, y, z = (
                             atom.cart if atom.cart is not None else (0.0, 0.0, 0.0)
                         )
+                        position = f"{x:.6f} {y:.6f} {z:.6f}"
+                    for k, (element, element_occ) in enumerate(entries):
+                        suffix = "" if k == 0 else element
+                        label = f"{clean_label}{suffix}_{ia}_{ib}_{ic}"
                         lines.append(
-                            f"{label:<12} {atom.element:<3} {x:.6f} {y:.6f} {z:.6f} {occ:.4f}"
+                            f"{label:<12} {element:<3} {position} {element_occ:.4f}"
                         )
 
     with open(path, "w", encoding="utf-8") as f:

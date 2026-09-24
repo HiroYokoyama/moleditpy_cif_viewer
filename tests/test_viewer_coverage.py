@@ -1197,17 +1197,12 @@ def test_on_render_data_ready_terminate_error_returns(qtbot):
     )
 
 
-def test_on_render_data_ready_error_with_atoms_shows_critical(qtbot, monkeypatch):
+def test_on_render_data_ready_error_with_atoms_is_reported(qtbot):
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
-    criticals = []
-    monkeypatch.setattr(
-        "cif_viewer.viewer.QMessageBox.critical",
-        lambda *a, **k: criticals.append(a),
-    )
     fake_atoms = ["atom"]
     widget._on_render_data_ready(fake_atoms, [], None, "boom error", (1, 1, 1))
-    assert criticals
+    assert "boom error" in widget.summary_label.text()
 
 
 def test_on_render_data_ready_draw_exception_shows_critical(qtbot, monkeypatch):
