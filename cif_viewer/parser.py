@@ -2,12 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
 import re
 import logging
 import warnings
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+MAX_CIF_BYTES = 64 * 1024 * 1024
+MAX_RENDER_ATOMS = 100_000
+
+
+def _read_cif_file(path):
+    if os.path.getsize(path) > MAX_CIF_BYTES:
+        raise ValueError("CIF file exceeds the supported 64 MiB size.")
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        text = handle.read(MAX_CIF_BYTES + 1)
+    if len(text) > MAX_CIF_BYTES:
+        raise ValueError("CIF file exceeds the supported 64 MiB size.")
+    return text
 
 # pymatgen's SpaceGroup (a monty Singleton) emits a UserWarning when a CIF
 # uses a non-standard Hermann-Mauguin symbol (e.g. 'I1a1').  The warning is
@@ -121,8 +135,7 @@ class RenderAtom:
 
 
 def parse_cif_file(path: str) -> CifStructure:
-    with open(path, "r", encoding="utf-8") as handle:
-        return parse_cif(handle.read(), name=path)
+    return parse_cif(_read_cif_file(path), name=path)
 
 
 def _get_first_tag_value(block_data, keys: List[str]) -> Optional[str]:
@@ -399,13 +412,9 @@ def parse_cif_file_pymatgen(path: str) -> List[CifStructure]:
             module="monty",
         )
 
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            raw_text = fh.read()
+        raw_text = _read_cif_file(path)
         safe_text = _mask_embedded_data_blocks(raw_text)
-        if safe_text is raw_text:
-            parser = CifParser(path)
-        else:
-            parser = CifParser.from_str(safe_text)
+        parser = CifParser.from_str(safe_text)
         structures = []
 
         for name, block in parser._cif.data.items():
@@ -871,6 +880,8 @@ def _structure_from_pymatgen(
 
 
 def parse_cif(text: str, name: str = "CIF") -> CifStructure:
+    if len(text) > MAX_CIF_BYTES:
+        raise ValueError("CIF text exceeds the supported 64 MiB size.")
     tags, loops, data_name = _read_cif_tokens(text)
     structure_name = data_name or name
 
@@ -975,6 +986,11 @@ def parse_cif(text: str, name: str = "CIF") -> CifStructure:
 
 
 def cell_vectors(lengths: Sequence[float], angles_deg: Sequence[float]) -> np.ndarray:
+    if (len(lengths) != 3 or len(angles_deg) != 3
+            or not np.isfinite(lengths).all() or not np.isfinite(angles_deg).all()
+            or any(value <= 0 for value in lengths)
+            or any(not 0 < value < 180 for value in angles_deg)):
+        raise ValueError("Invalid cell: lengths must be positive and angles between 0 and 180 degrees.")
     a_len, b_len, c_len = lengths
     alpha, beta, gamma = [math.radians(angle) for angle in angles_deg]
 
@@ -988,7 +1004,7 @@ def cell_vectors(lengths: Sequence[float], angles_deg: Sequence[float]) -> np.nd
     c_x = c_len * math.cos(beta)
     c_y = c_len * (math.cos(alpha) - math.cos(beta) * math.cos(gamma)) / sin_gamma
     c_z_sq = c_len * c_len - c_x * c_x - c_y * c_y
-    if c_z_sq < -1e-6:
+    if c_z_sq <= 1e-12 * c_len * c_len:
         raise ValueError("Invalid cell: angles and lengths are inconsistent.")
     c_vec = np.array([c_x, c_y, math.sqrt(max(c_z_sq, 0.0))])
     return np.vstack([a_vec, b_vec, c_vec])
@@ -1000,7 +1016,10 @@ def fractional_to_cartesian(fract: Sequence[float], lattice: np.ndarray) -> np.n
 
 def normalize_repeats(repeats: Sequence[float]) -> Tuple[float, float, float]:
     """Clamp supercell repeats to a sane positive range, allowing decimals."""
-    return tuple(min(50.0, max(0.05, float(value))) for value in repeats)
+    values = tuple(float(value) for value in repeats)
+    if len(values) != 3 or not np.isfinite(values).all():
+        raise ValueError("Supercell repeats must be three finite values.")
+    return tuple(min(50.0, max(0.05, value)) for value in values)
 
 
 def _repeat_cell_counts(repeat_vals: Sequence[float]) -> Tuple[int, int, int]:
@@ -1024,6 +1043,8 @@ def expand_supercell(
 ) -> Tuple[List[RenderAtom], List[Tuple[int, int]]]:
     repeat_vals = normalize_repeats(repeats)
     repeat_a, repeat_b, repeat_c = _repeat_cell_counts(repeat_vals)
+    if len(structure.atoms) * repeat_a * repeat_b * repeat_c > MAX_RENDER_ATOMS:
+        raise ValueError("Supercell exceeds the supported 100,000 atom limit.")
     crop_axes = _fractional_axes(repeat_vals)
     atoms: List[RenderAtom] = []
     base_atoms = (
@@ -1100,6 +1121,8 @@ def get_space_group_operations(structure: CifStructure) -> list:
 
 
 def _infer_periodic_adjacency(structure: CifStructure, tolerance: float = 0.45):
+    if len(structure.atoms) > 5_000:
+        raise ValueError("Periodic connectivity exceeds the 5,000 site limit; use Packing with Keep connected disabled.")
     adjacency = {atom_index: [] for atom_index in range(len(structure.atoms))}
     lattice = structure.lattice
 
@@ -1258,6 +1281,8 @@ def _expand_to_unit_cell(
         from pymatgen.core.operations import SymmOp
 
         symops = [SymmOp.from_xyz_str("x, y, z")]
+    if len(core_atoms) * len(symops) > MAX_RENDER_ATOMS:
+        raise ValueError("Symmetry expansion exceeds the supported 100,000 atom limit.")
 
     exp_atoms: List[CifAtom] = []
     is_asym: List[bool] = []
@@ -1725,9 +1750,10 @@ def parse_cif_number(value: str) -> float:
     if cleaned in {"?", "."}:
         raise ValueError("Missing numeric CIF value.")
     match = _UNCERTAINTY_RE.match(cleaned)
-    if match:
-        return float(match.group(1))
-    return float(cleaned)
+    result = float(match.group(1) if match else cleaned)
+    if not math.isfinite(result):
+        raise ValueError("CIF numeric values must be finite.")
+    return result
 
 
 def _read_cif_tokens(text: str):
@@ -1741,6 +1767,9 @@ def _read_cif_tokens(text: str):
         line = lines[index]
         lower = line.lower()
         if lower.startswith("data_"):
+            if _find_atom_loop(loops):
+                break
+            tags, loops = {}, []
             data_name = line[5:].strip() or data_name
             index += 1
             continue
@@ -1768,6 +1797,8 @@ def _read_cif_tokens(text: str):
             rows = []
             if headers:
                 width = len(headers)
+                if len(values) % width:
+                    raise ValueError("CIF loop contains an incomplete row.")
                 for start in range(0, len(values), width):
                     row_values = values[start : start + width]
                     if len(row_values) == width:
@@ -2083,12 +2114,16 @@ def write_supercell_cif(
 
     repeat_vals = normalize_repeats(repeats)
     repeat_a, repeat_b, repeat_c = _repeat_cell_counts(repeat_vals)
+    if len(structure.atoms) * repeat_a * repeat_b * repeat_c > MAX_RENDER_ATOMS:
+        raise ValueError("Supercell export exceeds the supported 100,000 atom limit.")
     crop_axes = _fractional_axes(repeat_vals)
     base_atoms = (
         unwrap_connected_atoms(structure)
         if (keep_connected and has_cell)
         else list(structure.atoms)
     )
+    if len(base_atoms) * repeat_a * repeat_b * repeat_c > MAX_RENDER_ATOMS:
+        raise ValueError("Supercell export exceeds the supported 100,000 atom limit.")
 
     if selected_disorder_key is not None:
         base_atoms = [

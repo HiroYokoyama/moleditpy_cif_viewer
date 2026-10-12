@@ -95,7 +95,7 @@ def _flat_structure(n=2):
 
 
 # ---------------------------------------------------------------------------
-# _run_render_calculation direct-call coverage (packing branch, RemoveHs error)
+# _run_render_calculation direct-call coverage
 # ---------------------------------------------------------------------------
 
 
@@ -117,7 +117,7 @@ def test_run_render_calculation_packing_branch():
     assert mol.GetProp("_from_cif_viewer") == "1"
 
 
-def test_run_render_calculation_remove_hs_failure(monkeypatch):
+def test_run_render_calculation_filters_hydrogens_before_rdkit(monkeypatch):
     struct = _flat_structure(2)
 
     def raise_remove_hs(mol):
@@ -137,9 +137,8 @@ def test_run_render_calculation_remove_hs_failure(monkeypatch):
         False,
         True,
     )
-    # RemoveHs failed, so mol keeps its original (unfiltered) atom count,
-    # but last_rendered_atoms is still filtered in python.
     assert all(a.element != "H" for a in atoms)
+    assert mol.GetNumAtoms() == len(atoms)
 
 
 # ---------------------------------------------------------------------------
@@ -1122,7 +1121,7 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
         nonlocal stop_event
         stop_event = True
 
-    monkeypatch.setattr(widget._render_thread, "terminate", mock_terminate)
+    monkeypatch.setattr(widget._render_thread, "requestInterruption", mock_terminate)
 
     # Pre-disconnect so on_cancel's own disconnect() call finds nothing left,
     # forcing the TypeError branch.

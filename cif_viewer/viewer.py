@@ -48,6 +48,9 @@ from .parser import (
 )
 from .rdkit_bridge import render_atoms_to_rdkit_mol
 
+# Cancelled workers must outlive their widgets until native chemistry returns.
+_RETIRED_RENDER_THREADS = set()
+
 
 def _run_render_calculation(
     structure_to_render,
@@ -62,6 +65,9 @@ def _run_render_calculation(
     show_bonds,
 ):
     from .parser import grow_molecules, expand_supercell
+
+    if QThread.currentThread().isInterruptionRequested():
+        raise RuntimeError("Rendering cancelled")
 
     if view_mode == "Whole Molecule":
         # Auto-detect polymers / frameworks: if any bond in the asymmetric unit
@@ -97,23 +103,20 @@ def _run_render_calculation(
             tolerance=tolerance,
         )
 
+    if QThread.currentThread().isInterruptionRequested():
+        raise RuntimeError("Rendering cancelled")
+    if not show_hydrogens:
+        kept = [i for i, atom in enumerate(atoms) if atom.element not in {"H", "D", "T"}]
+        indices = {old: new for new, old in enumerate(kept)}
+        atoms = [atoms[i] for i in kept]
+        bonds = [(indices[left], indices[right]) for left, right in bonds
+                 if left in indices and right in indices]
     mol_bonds = bonds if show_bonds else []
     det_bo = determine_bo and len(atoms) <= max_atoms
     mol = render_atoms_to_rdkit_mol(atoms, mol_bonds, determine_bond_order=det_bo)
     mol.SetProp("_from_cif_viewer", "1")
 
-    if not show_hydrogens:
-        from rdkit import Chem
-
-        try:
-            mol = Chem.RemoveHs(mol)
-        except Exception as e:
-            logging.debug("RemoveHs failed: %s", e)
-        last_rendered_atoms = [atom for atom in atoms if atom.element != "H"]
-    else:
-        last_rendered_atoms = atoms
-
-    return last_rendered_atoms, bonds, mol
+    return atoms, bonds, mol
 
 
 class RenderThread(QThread):
@@ -147,6 +150,8 @@ class RenderThread(QThread):
 
     def run(self):
         try:
+            if self.isInterruptionRequested():
+                return
             last_rendered_atoms, bonds, mol = _run_render_calculation(
                 self.structure_to_render,
                 self.view_mode,
@@ -159,10 +164,12 @@ class RenderThread(QThread):
                 self.show_hydrogens,
                 self.show_bonds,
             )
-            self.result_ready.emit(last_rendered_atoms, bonds, mol, "")
+            if not self.isInterruptionRequested():
+                self.result_ready.emit(last_rendered_atoms, bonds, mol, "")
         except Exception as exc:
             err_trace = traceback.format_exc()
-            self.result_ready.emit([], [], None, f"{exc}\n{err_trace}")
+            if not self.isInterruptionRequested():
+                self.result_ready.emit([], [], None, f"{exc}\n{err_trace}")
 
 
 class CifViewerWidget(QWidget):
@@ -177,6 +184,7 @@ class CifViewerWidget(QWidget):
         self.overlay_actor_names = []
         self._reset_camera_on_next_render = True
         self._render_thread = None
+        self._closed = False
 
         self.render_timer = QTimer(self)
         self.render_timer.setSingleShot(True)
@@ -1470,23 +1478,18 @@ class CifViewerWidget(QWidget):
             logging.error("Failed to save settings: %s", e)
 
     def load_cif(self, path: str):
-        for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
-            spin.blockSignals(True)
-            spin.setValue(1)
-            spin.blockSignals(False)
-
         try:
-            self.all_structures = parse_cif_file_pymatgen(path)
+            structures = parse_cif_file_pymatgen(path)
         except Exception as e_pymatgen:
             logging.info(
                 "pymatgen parser failed, falling back to built-in parser: %s",
                 e_pymatgen,
             )
-            self.all_structures = []
+            structures = []
 
-        if not self.all_structures:
+        if not structures:
             try:
-                self.all_structures = [parse_cif_file(path)]
+                structures = [parse_cif_file(path)]
             except Exception as exc:
                 QMessageBox.critical(
                     self, "CIF Viewer", f"Could not read CIF file:\n{exc}"
@@ -1494,11 +1497,18 @@ class CifViewerWidget(QWidget):
                 logging.error("Failed to read CIF file %s: %s", path, exc)
                 return
 
-        if not self.all_structures:
+        if not structures:
             QMessageBox.critical(
                 self, "CIF Viewer", "No valid structures found in CIF file."
             )
             return
+
+        self._cancel_render()
+        self.all_structures = structures
+        for spin in (self.repeat_a, self.repeat_b, self.repeat_c):
+            spin.blockSignals(True)
+            spin.setValue(1)
+            spin.blockSignals(False)
 
         self._reset_camera_on_next_render = True
         self.current_path = path
@@ -1539,15 +1549,36 @@ class CifViewerWidget(QWidget):
 
         QTimer.singleShot(100, self.render)
 
-    def closeEvent(self, event):
-        if self._render_thread is not None:
+    def _cancel_render(self):
+        thread = self._render_thread
+        if thread is not None:
+            self._render_thread = None
             try:
-                self._render_thread.result_ready.disconnect()
+                thread.result_ready.disconnect()
             except TypeError:
                 pass
-            self._render_thread.terminate()
-            self._render_thread.wait()
-            self._render_thread = None
+            thread.requestInterruption()
+            thread.setParent(None)
+            if thread.isRunning():
+                _RETIRED_RENDER_THREADS.add(thread)
+                def release():
+                    _RETIRED_RENDER_THREADS.discard(thread)
+                    thread.deleteLater()
+                thread.finished.connect(release)
+                if not thread.isRunning():
+                    release()
+            else:
+                thread.deleteLater()
+
+    def showEvent(self, event):
+        self._closed = False
+        super().showEvent(event)
+
+    def closeEvent(self, event):
+        self._closed = True
+        self.render_timer.stop()
+        self._cancel_render()
+        self.clear_view()
         super().closeEvent(event)
 
     def clear_view(self, redraw=True):
@@ -1589,7 +1620,7 @@ class CifViewerWidget(QWidget):
         self.render_timer.start(50)
 
     def _render_now(self):
-        if self.structure is None:
+        if self._closed or self.structure is None:
             return
 
         plotter = self._plotter()
@@ -1645,14 +1676,7 @@ class CifViewerWidget(QWidget):
         show_bonds = self.show_bonds.isChecked()
 
         # Stop any existing render thread
-        if self._render_thread is not None:
-            try:
-                self._render_thread.result_ready.disconnect()
-            except TypeError:
-                pass
-            self._render_thread.terminate()
-            self._render_thread.wait()
-            self._render_thread = None
+        self._cancel_render()
 
         # Create thread
         self._render_thread = RenderThread(
@@ -1721,6 +1745,7 @@ class CifViewerWidget(QWidget):
             return
 
         if est_atoms > 250:
+            thread = self._render_thread
             progress_dialog = QProgressDialog(
                 "Rendering CIF structure, please wait...", "Cancel", 0, 0, self
             )
@@ -1731,34 +1756,34 @@ class CifViewerWidget(QWidget):
             )
 
             def on_cancel():
-                if self._render_thread is not None:
-                    try:
-                        self._render_thread.result_ready.disconnect()
-                    except TypeError:
-                        pass
-                    self._render_thread.terminate()
-                    self._render_thread.wait()
-                    self._render_thread = None
+                if self._render_thread is thread:
+                    self._cancel_render()
 
             progress_dialog.canceled.connect(on_cancel)
+            thread.finished.connect(progress_dialog.close)
             progress_dialog.show()
 
             def on_ready(last_rendered_atoms, bonds, mol, err_msg):
                 progress_dialog.close()
+                if self._closed or self._render_thread is not thread:
+                    return
                 self._on_render_data_ready(
                     last_rendered_atoms, bonds, mol, err_msg, repeats
                 )
 
-            self._render_thread.result_ready.connect(on_ready)
+            thread.result_ready.connect(on_ready)
             self._render_thread.start()
         else:
 
             def on_ready(last_rendered_atoms, bonds, mol, err_msg):
+                if self._closed or self._render_thread is not thread:
+                    return
                 self._on_render_data_ready(
                     last_rendered_atoms, bonds, mol, err_msg, repeats
                 )
 
-            self._render_thread.result_ready.connect(on_ready)
+            thread = self._render_thread
+            thread.result_ready.connect(on_ready)
             self._render_thread.start()
 
     def _on_render_data_ready(self, last_rendered_atoms, bonds, mol, err_msg, repeats):
@@ -1786,7 +1811,7 @@ class CifViewerWidget(QWidget):
             return
 
         def draw_overlays_and_render():
-            if sip.isdeleted(self):
+            if sip.isdeleted(self) or self._closed:
                 return
 
             try:

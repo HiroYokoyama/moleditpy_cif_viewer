@@ -12,7 +12,11 @@ def render_atoms_to_rdkit_mol(
 
     rw_mol = Chem.RWMol()
     for atom in render_atoms:
-        rw_mol.AddAtom(Chem.Atom(atom.element))
+        symbol = "H" if atom.element in ("D", "T") else atom.element
+        rd_atom = Chem.Atom(symbol)
+        if atom.element in ("D", "T"):
+            rd_atom.SetIsotope(2 if atom.element == "D" else 3)
+        rw_mol.AddAtom(rd_atom)
 
     seen = set()
     for left, right in bonds:
