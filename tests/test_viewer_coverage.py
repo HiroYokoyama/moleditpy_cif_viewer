@@ -1312,6 +1312,29 @@ def test_on_render_data_ready_qtimer_singleshot_failure_falls_back_sync(
     assert plotter.rendered
 
 
+def test_deferred_render_releases_deleted_widget_before_timer_fires(qtbot):
+    import gc
+    import weakref
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from rdkit import Chem
+
+    plotter = FakePlotter()
+    widget = CifViewerWidget(context=StubContext(plotter))
+    qtbot.addWidget(widget)
+    widget.structure = _flat_structure()
+    widget._on_render_data_ready([], [], Chem.Mol(), "", (1, 1, 1))
+    retained = weakref.ref(widget)
+    widget.close()
+    widget.deleteLater()
+    del widget
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    assert retained() is None
+    qtbot.wait(150)
+    assert not plotter.camera_reset
+
+
 def test_on_render_data_ready_bond_order_failure_message(qtbot):
     from cif_viewer.parser import parse_cif
     from rdkit import Chem

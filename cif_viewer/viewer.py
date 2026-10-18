@@ -1547,7 +1547,7 @@ class CifViewerWidget(QWidget):
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
 
-        QTimer.singleShot(100, self.render)
+        QTimer.singleShot(100, self, self.render)
 
     def _cancel_render(self):
         thread = self._render_thread
@@ -1839,7 +1839,9 @@ class CifViewerWidget(QWidget):
                 logging.error("Failed to reset camera or render cell: %s", exc)
 
         try:
-            QTimer.singleShot(100, draw_overlays_and_render)
+            # The native context cancels the callback when this widget is
+            # destroyed, before Qt can dispatch a dangling Python receiver.
+            QTimer.singleShot(100, self, draw_overlays_and_render)
         except Exception as exc:
             logging.warning(
                 "Failed to schedule draw_overlays_and_render with QTimer: %s",
