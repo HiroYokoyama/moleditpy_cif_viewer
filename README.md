@@ -131,7 +131,7 @@ The plugin uses the MoleditPy Plugin API, structured as follows:
 *   **`cif_viewer/__init__.py`**: Contains the plugin metadata, the `initialize(context)` entry point, the `.cif` file opener association, and the `draw_ellipsoid_model` styling method.
 *   **`cif_viewer/parser.py`**: Handles low-level CIF file reading. Attempts high-fidelity parsing via `pymatgen` if installed, falling back to a lightweight built-in string parser. Contains the supercell generator and CIF file exporter.
 *   **`cif_viewer/rdkit_bridge.py`**: Maps parsed structures into an RDKit molecule. Applies a special flag `_from_cif_viewer` to the molecule properties.
-*   **`cif_viewer/viewer.py`**: Manages the PySide/PyQt6 graphical controls, load/save configuration states in `settings.json`, and coordinates camera view transformations.
+*   **`cif_viewer/viewer.py`**: Manages the PySide/PySide6 graphical controls, load/save configuration states in `settings.json`, and coordinates camera view transformations.
 
 ### Failsafe Safeguard
 The custom drawing callback in `__init__.py` checks the active molecule for the `_from_cif_viewer` property. If a user loads a normal molecule (e.g. from an XYZ or MOL file) while the style is set to "Thermal Ellipsoids", the plugin automatically switches the view back to "Ball and Stick" style, preventing rendering artifacts or crash loops.
@@ -153,7 +153,7 @@ The plugin comes with a comprehensive unit and integration test suite that runs 
 # Run the full test suite
 python test_all.py
 
-# Run only unit/parser tests (skipping PyQt6 GUI/integration tests)
+# Run only unit/parser tests (skipping PySide6 GUI/integration tests)
 python test_all.py --unit-only
 ```
 
@@ -163,7 +163,7 @@ python test_all.py --unit-only
 
 *   **`numpy`**: High-performance linear algebra for coordinates, lattice vectors, and camera rotation matrices.
 *   **`pymatgen`**: Comprehensive crystallographic parsing of CIF files, symmetry evaluation, and anisotropic displacement parameter extraction.
-*   **`PyQt6`**: Dockable GUI layouts, slider widgets, color pickers, and asynchronous timers.
+*   **`PySide6`**: Dockable GUI layouts, slider widgets, color pickers, and asynchronous timers.
 *   **`pyvista`**: High-level VTK wrapper for 3D rendering of structural meshes, borders, lines, and camera manipulations.
 *   **`rdkit`**: Cheminformatics library for atom modeling, bond perception, and property storage.
 

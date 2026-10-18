@@ -261,7 +261,7 @@ def test_hooked_draw_qtimer_schedule_failure_calls_overlays_directly(monkeypatch
     def bad_singleshot(ms, cb):
         raise RuntimeError("no event loop")
 
-    import PyQt6.QtCore as qtcore
+    import PySide6.QtCore as qtcore
 
     monkeypatch.setattr(
         qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
@@ -311,7 +311,7 @@ def test_open_file_qtimer_schedule_failure_falls_back_to_direct_call(monkeypatch
     def bad_singleshot(ms, cb):
         raise RuntimeError("no loop")
 
-    import PyQt6.QtCore as qtcore
+    import PySide6.QtCore as qtcore
 
     monkeypatch.setattr(
         qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
@@ -744,7 +744,7 @@ def test_draw_ellipsoid_model_non_testing_qtimer_failure_falls_back(monkeypatch)
     widget = _make_widget()
     draw_callback, mol = _setup(monkeypatch, mw, widget)
 
-    import PyQt6.QtCore as qtcore
+    import PySide6.QtCore as qtcore
 
     def bad_singleshot(ms, cb):
         raise RuntimeError("no loop")

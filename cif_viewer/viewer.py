@@ -9,10 +9,10 @@ import traceback
 from typing import Optional
 
 import numpy as np
-from PyQt6 import sip  # pylint: disable=c-extension-no-member
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import (
+from shiboken6 import isValid
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -120,7 +120,7 @@ def _run_render_calculation(
 
 
 class RenderThread(QThread):
-    result_ready = pyqtSignal(list, list, object, str)
+    result_ready = Signal(list, list, object, str)
 
     def __init__(
         self,
@@ -1811,7 +1811,7 @@ class CifViewerWidget(QWidget):
             return
 
         def draw_overlays_and_render():
-            if sip.isdeleted(self) or self._closed:
+            if not isValid(self) or self._closed:
                 return
 
             try:

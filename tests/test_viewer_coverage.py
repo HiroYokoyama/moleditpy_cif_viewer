@@ -190,8 +190,8 @@ def test_create_color_button_pick_color(qtbot, monkeypatch):
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
 
-    from PyQt6.QtGui import QColor
-    from PyQt6.QtWidgets import QColorDialog
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
 
     monkeypatch.setattr(
         QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor("#abcdef"))
@@ -212,8 +212,8 @@ def test_create_color_button_pick_color_invalid(qtbot, monkeypatch):
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
 
-    from PyQt6.QtGui import QColor
-    from PyQt6.QtWidgets import QColorDialog
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
 
     monkeypatch.setattr(
         QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor())
@@ -248,7 +248,7 @@ def test_export_supercell_cancel_dialog(qtbot, monkeypatch, tmp_path):
     widget.structure = parse_cif(SIMPLE_CIF)
 
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: ("", ""),
     )
     # Should just return, no exception
@@ -265,7 +265,7 @@ def test_export_supercell_asymmetric_unit(qtbot, monkeypatch, tmp_path):
 
     out_path = tmp_path / "asym_export.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out_path), ""),
     )
     infos = []
@@ -289,7 +289,7 @@ def test_export_supercell_packing(qtbot, monkeypatch, tmp_path):
 
     out_path = tmp_path / "pack_export.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out_path), ""),
     )
     infos = []
@@ -312,7 +312,7 @@ def test_export_supercell_exception(qtbot, monkeypatch, tmp_path):
 
     out_path = tmp_path / "fail_export.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out_path), ""),
     )
 
@@ -539,7 +539,7 @@ def test_choose_file_opens_selected_path(qtbot, monkeypatch, tmp_path):
     qtbot.addWidget(widget)
 
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(cif_file), ""),
     )
     loaded = []
@@ -552,7 +552,7 @@ def test_choose_file_cancelled(qtbot, monkeypatch):
     widget = CifViewerWidget(context=StubContext(FakePlotter()))
     qtbot.addWidget(widget)
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName", lambda *a, **k: ("", "")
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *a, **k: ("", "")
     )
     loaded = []
     monkeypatch.setattr(widget, "load_cif", lambda p: loaded.append(p))
@@ -937,7 +937,7 @@ def test_load_cif_updates_init_manager_path(qtbot, tmp_path):
 
 
 def test_close_event_terminates_active_render_thread(qtbot):
-    from PyQt6.QtGui import QCloseEvent
+    from PySide6.QtGui import QCloseEvent
 
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
@@ -1109,7 +1109,7 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
     monkeypatch.setenv("QT_QPA_PLATFORM", "windows")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
-    from PyQt6.QtWidgets import QProgressDialog
+    from PySide6.QtWidgets import QProgressDialog
 
     monkeypatch.setattr(QProgressDialog, "show", lambda self_dialog: None)
     monkeypatch.setattr(QProgressDialog, "close", lambda self_dialog: None)
@@ -1128,7 +1128,7 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
     widget._render_thread.result_ready.disconnect()
 
     # Find the QProgressDialog child and trigger cancellation.
-    from PyQt6.QtWidgets import QProgressDialog as _QPD
+    from PySide6.QtWidgets import QProgressDialog as _QPD
 
     dialogs = widget.findChildren(_QPD)
     assert dialogs
@@ -1503,7 +1503,7 @@ def test_plotter_returns_none_when_nothing_available(qtbot):
 
 
 def test_main_window_uses_parent_chain_without_context(qtbot):
-    from PyQt6.QtWidgets import QWidget
+    from PySide6.QtWidgets import QWidget
 
     grandparent = QWidget()
     parent = QWidget(grandparent)
