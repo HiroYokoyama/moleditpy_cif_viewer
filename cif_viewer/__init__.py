@@ -18,7 +18,7 @@ PLUGIN_DESCRIPTION = (
     "supercell rendering for MoleditPy."
 )
 PLUGIN_DEPENDENCIES = ["numpy", "pymatgen", "PySide6-Essentials", "pyvista", "rdkit"]
-PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=5.0.0a1, <6.0.0"
+PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=5.0.0, <6.0.0"
 
 WINDOW_ID = "cif_viewer_panel"
 
