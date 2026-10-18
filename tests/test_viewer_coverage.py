@@ -5,6 +5,7 @@ camera axis edge cases, settings error paths, thread run() body, etc.)."""
 import logging
 
 import numpy as np
+import pytest
 
 from cif_viewer.parser import CifStructure, CifAtom
 from cif_viewer.viewer import (
@@ -1137,7 +1138,11 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
     qtbot.waitUntil(lambda: widget._render_thread is None, timeout=3000)
 
 
-def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
+@pytest.mark.parametrize("atom_count", [6, 10])
+def test_render_now_async_results_stay_on_gui_thread(
+    qtbot, qapp, monkeypatch, atom_count
+):
+    from PySide6.QtCore import QThread
     from rdkit import Chem
 
     monkeypatch.setattr(
@@ -1156,7 +1161,7 @@ def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
             np.array([i / 10.0, 0.0, 0.0]),
             np.array([float(i), 0.0, 0.0]),
         )
-        for i in range(6)
+        for i in range(atom_count)
     )
     widget.structure = CifStructure(
         "mid", (10.0, 10.0, 10.0), (90.0, 90.0, 90.0), lattice, atoms
@@ -1170,7 +1175,12 @@ def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
         spin.setValue(3)
         spin.blockSignals(False)
 
-    monkeypatch.setattr(widget, "_draw_with_moleditpy", lambda mol: None)
+    rendered_threads = []
+    monkeypatch.setattr(
+        widget,
+        "_draw_with_moleditpy",
+        lambda mol: rendered_threads.append(QThread.currentThread()),
+    )
     monkeypatch.setenv("MOLEDITPY_HEADLESS", "0")
     monkeypatch.setenv("QT_QPA_PLATFORM", "windows")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
@@ -1179,7 +1189,9 @@ def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
     qtbot.waitUntil(
         lambda: getattr(widget, "last_rendered_atoms", None) is not None, timeout=5000
     )
-    assert len(widget.last_rendered_atoms) == 6 * 27
+    assert len(widget.last_rendered_atoms) == atom_count * 27
+    assert rendered_threads == [qapp.thread()]
+    assert widget._render_progress is None
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ from typing import Optional
 
 import numpy as np
 from shiboken6 import isValid
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSignalBlocker, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -184,6 +184,7 @@ class CifViewerWidget(QWidget):
         self.overlay_actor_names = []
         self._reset_camera_on_next_render = True
         self._render_thread = None
+        self._render_progress = None
         self._closed = False
 
         self.render_timer = QTimer(self)
@@ -1549,7 +1550,17 @@ class CifViewerWidget(QWidget):
 
         QTimer.singleShot(100, self, self.render)
 
+    def _close_render_progress(self):
+        progress = self._render_progress
+        self._render_progress = None
+        if progress is not None:
+            with QSignalBlocker(progress):
+                progress.close()
+            progress.deleteLater()
+
+    @Slot()
     def _cancel_render(self):
+        self._close_render_progress()
         thread = self._render_thread
         if thread is not None:
             self._render_thread = None
@@ -1744,8 +1755,13 @@ class CifViewerWidget(QWidget):
                 self._on_render_data_ready([], [], None, str(exc), repeats)
             return
 
+        thread = self._render_thread
+        # A QObject slot provides a native receiver context: Qt queues the
+        # result to the GUI thread and drops delivery if the widget is deleted.
+        thread.result_ready.connect(
+            self._on_render_thread_result, Qt.ConnectionType.QueuedConnection
+        )
         if est_atoms > 250:
-            thread = self._render_thread
             progress_dialog = QProgressDialog(
                 "Rendering CIF structure, please wait...", "Cancel", 0, 0, self
             )
@@ -1755,36 +1771,20 @@ class CifViewerWidget(QWidget):
                 progress_dialog.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
             )
 
-            def on_cancel():
-                if self._render_thread is thread:
-                    self._cancel_render()
-
-            progress_dialog.canceled.connect(on_cancel)
-            thread.finished.connect(progress_dialog.close)
+            self._render_progress = progress_dialog
+            progress_dialog.canceled.connect(self._cancel_render)
             progress_dialog.show()
+        thread.start()
 
-            def on_ready(last_rendered_atoms, bonds, mol, err_msg):
-                progress_dialog.close()
-                if self._closed or self._render_thread is not thread:
-                    return
-                self._on_render_data_ready(
-                    last_rendered_atoms, bonds, mol, err_msg, repeats
-                )
-
-            thread.result_ready.connect(on_ready)
-            self._render_thread.start()
-        else:
-
-            def on_ready(last_rendered_atoms, bonds, mol, err_msg):
-                if self._closed or self._render_thread is not thread:
-                    return
-                self._on_render_data_ready(
-                    last_rendered_atoms, bonds, mol, err_msg, repeats
-                )
-
-            thread = self._render_thread
-            thread.result_ready.connect(on_ready)
-            self._render_thread.start()
+    @Slot(list, list, object, str)
+    def _on_render_thread_result(self, last_rendered_atoms, bonds, mol, err_msg):
+        thread = self.sender()
+        if self._closed or thread is None or thread is not self._render_thread:
+            return
+        self._close_render_progress()
+        self._on_render_data_ready(
+            last_rendered_atoms, bonds, mol, err_msg, thread.repeats
+        )
 
     def _on_render_data_ready(self, last_rendered_atoms, bonds, mol, err_msg, repeats):
         if err_msg:
