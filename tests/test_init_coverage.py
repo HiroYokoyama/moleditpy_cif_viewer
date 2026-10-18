@@ -944,6 +944,48 @@ def test_draw_ellipsoid_worker_is_retained_until_finished(monkeypatch, error):
     assert worker.deleted
 
 
+def test_native_ellipsoid_thread_with_real_progress_parent(monkeypatch, qtbot, qapp):
+    from PySide6.QtCore import QThread
+    from PySide6.QtWidgets import QProgressDialog, QWidget
+
+    import cif_viewer
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("MOLEDITPY_HEADLESS", raising=False)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    class NativeWorker(EllipsoidWorkerThread):
+        def run(self):
+            self.result_ready.emit(None, None, None, None, "")
+            self.msleep(20)
+
+    monkeypatch.setattr(cif_viewer, "EllipsoidWorkerThread", NativeWorker)
+    rendered_threads = []
+    mw = _base_mw()
+    mw.plotter = _MockPlotter()
+    mw.plotter.clear = lambda: rendered_threads.append(QThread.currentThread())
+    n = 101
+    widget = QWidget()
+    qtbot.addWidget(widget)
+    for name, value in vars(
+        _make_widget(
+            structure=_MockStructure(np.zeros((n, 3, 3))),
+            last_rendered_atoms=[_MockAtom(f"C{i}", "C", i) for i in range(n)],
+        )
+    ).items():
+        setattr(widget, name, value)
+    mol = _make_mol(["C"] * n, [(float(i), 0.0, 0.0) for i in range(n)])
+    # Only host window registration is stubbed. Restore the native binding
+    # before running QProgressDialog and the real worker/event loop.
+    with monkeypatch.context() as registration:
+        draw_callback, mol = _setup(registration, mw, widget, mol=mol)
+
+    draw_callback(mw, mol)
+    assert widget.findChild(QProgressDialog) is not None
+    qtbot.waitUntil(lambda: mw._ellipsoid_thread is None, timeout=5000)
+    assert rendered_threads == [qapp.thread()]
+
+
 def test_draw_ellipsoid_model_threaded_path_terminates_previous_thread(monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("MOLEDITPY_HEADLESS", raising=False)
