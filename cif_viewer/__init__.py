@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "2.0.0a1"
+PLUGIN_VERSION = "2.0.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
