@@ -30,6 +30,8 @@ def clean_settings_json():
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_API", "pyside6")
+os.environ.setdefault("PYTEST_QT_API", "pyside6")
 
 
 @pytest.fixture(scope="session", autouse=True)
