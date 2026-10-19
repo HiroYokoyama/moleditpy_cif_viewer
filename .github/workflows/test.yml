@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  MOLEDITPY_REF: ${{ inputs.moleditpy_ref || vars.MOLEDITPY_REF || 'migrate/pyside6-without-openbabel' }}
+  MOLEDITPY_REF: ${{ inputs.moleditpy_ref || vars.MOLEDITPY_REF || 'main' }}
 
 jobs:
   test:
