@@ -5,6 +5,7 @@ camera axis edge cases, settings error paths, thread run() body, etc.)."""
 import logging
 
 import numpy as np
+import pytest
 
 from cif_viewer.parser import CifStructure, CifAtom
 from cif_viewer.viewer import (
@@ -190,8 +191,8 @@ def test_create_color_button_pick_color(qtbot, monkeypatch):
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
 
-    from PyQt6.QtGui import QColor
-    from PyQt6.QtWidgets import QColorDialog
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
 
     monkeypatch.setattr(
         QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor("#abcdef"))
@@ -212,8 +213,8 @@ def test_create_color_button_pick_color_invalid(qtbot, monkeypatch):
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
 
-    from PyQt6.QtGui import QColor
-    from PyQt6.QtWidgets import QColorDialog
+    from PySide6.QtGui import QColor
+    from PySide6.QtWidgets import QColorDialog
 
     monkeypatch.setattr(
         QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor())
@@ -248,7 +249,7 @@ def test_export_supercell_cancel_dialog(qtbot, monkeypatch, tmp_path):
     widget.structure = parse_cif(SIMPLE_CIF)
 
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: ("", ""),
     )
     # Should just return, no exception
@@ -265,7 +266,7 @@ def test_export_supercell_asymmetric_unit(qtbot, monkeypatch, tmp_path):
 
     out_path = tmp_path / "asym_export.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out_path), ""),
     )
     infos = []
@@ -289,7 +290,7 @@ def test_export_supercell_packing(qtbot, monkeypatch, tmp_path):
 
     out_path = tmp_path / "pack_export.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out_path), ""),
     )
     infos = []
@@ -312,7 +313,7 @@ def test_export_supercell_exception(qtbot, monkeypatch, tmp_path):
 
     out_path = tmp_path / "fail_export.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(out_path), ""),
     )
 
@@ -539,7 +540,7 @@ def test_choose_file_opens_selected_path(qtbot, monkeypatch, tmp_path):
     qtbot.addWidget(widget)
 
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName",
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(cif_file), ""),
     )
     loaded = []
@@ -552,7 +553,7 @@ def test_choose_file_cancelled(qtbot, monkeypatch):
     widget = CifViewerWidget(context=StubContext(FakePlotter()))
     qtbot.addWidget(widget)
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getOpenFileName", lambda *a, **k: ("", "")
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *a, **k: ("", "")
     )
     loaded = []
     monkeypatch.setattr(widget, "load_cif", lambda p: loaded.append(p))
@@ -937,7 +938,7 @@ def test_load_cif_updates_init_manager_path(qtbot, tmp_path):
 
 
 def test_close_event_terminates_active_render_thread(qtbot):
-    from PyQt6.QtGui import QCloseEvent
+    from PySide6.QtGui import QCloseEvent
 
     widget = CifViewerWidget()
     qtbot.addWidget(widget)
@@ -1109,7 +1110,7 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
     monkeypatch.setenv("QT_QPA_PLATFORM", "windows")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
-    from PyQt6.QtWidgets import QProgressDialog
+    from PySide6.QtWidgets import QProgressDialog
 
     monkeypatch.setattr(QProgressDialog, "show", lambda self_dialog: None)
     monkeypatch.setattr(QProgressDialog, "close", lambda self_dialog: None)
@@ -1128,7 +1129,7 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
     widget._render_thread.result_ready.disconnect()
 
     # Find the QProgressDialog child and trigger cancellation.
-    from PyQt6.QtWidgets import QProgressDialog as _QPD
+    from PySide6.QtWidgets import QProgressDialog as _QPD
 
     dialogs = widget.findChildren(_QPD)
     assert dialogs
@@ -1137,7 +1138,11 @@ def test_render_now_progress_dialog_cancel_already_disconnected(qtbot, monkeypat
     qtbot.waitUntil(lambda: widget._render_thread is None, timeout=3000)
 
 
-def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
+@pytest.mark.parametrize("atom_count", [6, 10])
+def test_render_now_async_results_stay_on_gui_thread(
+    qtbot, qapp, monkeypatch, atom_count
+):
+    from PySide6.QtCore import QThread
     from rdkit import Chem
 
     monkeypatch.setattr(
@@ -1156,7 +1161,7 @@ def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
             np.array([i / 10.0, 0.0, 0.0]),
             np.array([float(i), 0.0, 0.0]),
         )
-        for i in range(6)
+        for i in range(atom_count)
     )
     widget.structure = CifStructure(
         "mid", (10.0, 10.0, 10.0), (90.0, 90.0, 90.0), lattice, atoms
@@ -1170,7 +1175,12 @@ def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
         spin.setValue(3)
         spin.blockSignals(False)
 
-    monkeypatch.setattr(widget, "_draw_with_moleditpy", lambda mol: None)
+    rendered_threads = []
+    monkeypatch.setattr(
+        widget,
+        "_draw_with_moleditpy",
+        lambda mol: rendered_threads.append(QThread.currentThread()),
+    )
     monkeypatch.setenv("MOLEDITPY_HEADLESS", "0")
     monkeypatch.setenv("QT_QPA_PLATFORM", "windows")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
@@ -1179,7 +1189,9 @@ def test_render_now_mid_size_async_no_progress_dialog(qtbot, monkeypatch):
     qtbot.waitUntil(
         lambda: getattr(widget, "last_rendered_atoms", None) is not None, timeout=5000
     )
-    assert len(widget.last_rendered_atoms) == 6 * 27
+    assert len(widget.last_rendered_atoms) == atom_count * 27
+    assert rendered_threads == [qapp.thread()]
+    assert widget._render_progress is None
 
 
 # ---------------------------------------------------------------------------
@@ -1310,6 +1322,29 @@ def test_on_render_data_ready_qtimer_singleshot_failure_falls_back_sync(
     widget._on_render_data_ready([], [], mol, "", (1, 1, 1))
     # Fallback path calls draw_overlays_and_render() synchronously
     assert plotter.rendered
+
+
+def test_deferred_render_releases_deleted_widget_before_timer_fires(qtbot):
+    import gc
+    import weakref
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from rdkit import Chem
+
+    plotter = FakePlotter()
+    widget = CifViewerWidget(context=StubContext(plotter))
+    qtbot.addWidget(widget)
+    widget.structure = _flat_structure()
+    widget._on_render_data_ready([], [], Chem.Mol(), "", (1, 1, 1))
+    retained = weakref.ref(widget)
+    widget.close()
+    widget.deleteLater()
+    del widget
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    assert retained() is None
+    qtbot.wait(150)
+    assert not plotter.camera_reset
 
 
 def test_on_render_data_ready_bond_order_failure_message(qtbot):
@@ -1503,7 +1538,7 @@ def test_plotter_returns_none_when_nothing_available(qtbot):
 
 
 def test_main_window_uses_parent_chain_without_context(qtbot):
-    from PyQt6.QtWidgets import QWidget
+    from PySide6.QtWidgets import QWidget
 
     grandparent = QWidget()
     parent = QWidget(grandparent)

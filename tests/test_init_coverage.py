@@ -7,6 +7,7 @@ import sys
 import types
 
 import numpy as np
+import pytest
 from rdkit import Chem
 
 from cif_viewer import EllipsoidWorkerThread, initialize
@@ -261,7 +262,7 @@ def test_hooked_draw_qtimer_schedule_failure_calls_overlays_directly(monkeypatch
     def bad_singleshot(ms, cb):
         raise RuntimeError("no event loop")
 
-    import PyQt6.QtCore as qtcore
+    import PySide6.QtCore as qtcore
 
     monkeypatch.setattr(
         qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
@@ -311,7 +312,7 @@ def test_open_file_qtimer_schedule_failure_falls_back_to_direct_call(monkeypatch
     def bad_singleshot(ms, cb):
         raise RuntimeError("no loop")
 
-    import PyQt6.QtCore as qtcore
+    import PySide6.QtCore as qtcore
 
     monkeypatch.setattr(
         qtcore, "QTimer", types.SimpleNamespace(singleShot=bad_singleshot)
@@ -744,7 +745,7 @@ def test_draw_ellipsoid_model_non_testing_qtimer_failure_falls_back(monkeypatch)
     widget = _make_widget()
     draw_callback, mol = _setup(monkeypatch, mw, widget)
 
-    import PyQt6.QtCore as qtcore
+    import PySide6.QtCore as qtcore
 
     def bad_singleshot(ms, cb):
         raise RuntimeError("no loop")
@@ -853,14 +854,20 @@ class _FakeEllipsoidThread:
 
     def __init__(self, *args, **kwargs):
         self.result_ready = _FakeThreadSignal()
+        self.finished = _FakeThreadSignal()
         self.started = False
         self.terminated = False
         self.waited = False
+        self.deleted = False
         _FakeEllipsoidThread.instances.append(self)
 
     def start(self):
         self.started = True
         self.result_ready.emit(None, None, None, None, "")
+        self.finished.emit()
+
+    def deleteLater(self):
+        self.deleted = True
 
     def terminate(self):
         self.terminated = True
@@ -899,7 +906,84 @@ def test_draw_ellipsoid_model_threaded_path_used_for_many_atoms(monkeypatch):
 
     assert len(_FakeEllipsoidThread.instances) == 1
     assert _FakeEllipsoidThread.instances[0].started is True
-    assert mw._ellipsoid_thread is None  # cleared by on_ready
+    assert mw._ellipsoid_thread is None  # cleared only after the thread finished
+    assert _FakeEllipsoidThread.instances[0].deleted
+
+
+@pytest.mark.parametrize("error", ["", "geometry generation failed"])
+def test_draw_ellipsoid_worker_is_retained_until_finished(monkeypatch, error):
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("MOLEDITPY_HEADLESS", raising=False)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    import cif_viewer
+
+    class DelayedFinishThread(_FakeEllipsoidThread):
+        def start(self):
+            self.started = True
+            self.result_ready.emit(None, None, None, None, error)
+
+    monkeypatch.setattr(cif_viewer, "EllipsoidWorkerThread", DelayedFinishThread)
+    mw = _base_mw()
+    mw.plotter = _MockPlotter()
+    n = 101
+    widget = _make_widget(
+        structure=_MockStructure(np.zeros((n, 3, 3))),
+        last_rendered_atoms=[_MockAtom(f"C{i}", "C", i) for i in range(n)],
+    )
+    mol = _make_mol(["C"] * n, [(float(i), 0.0, 0.0) for i in range(n)])
+    draw_callback, mol = _setup(monkeypatch, mw, widget, mol=mol)
+
+    draw_callback(mw, mol)
+    worker = mw._ellipsoid_thread
+    assert worker.started
+    assert not worker.deleted
+
+    worker.finished.emit()
+    assert mw._ellipsoid_thread is None
+    assert worker.deleted
+
+
+def test_native_ellipsoid_thread_with_real_progress_parent(monkeypatch, qtbot, qapp):
+    from PySide6.QtCore import QThread
+    from PySide6.QtWidgets import QProgressDialog, QWidget
+
+    import cif_viewer
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("MOLEDITPY_HEADLESS", raising=False)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+
+    class NativeWorker(EllipsoidWorkerThread):
+        def run(self):
+            self.result_ready.emit(None, None, None, None, "")
+            self.msleep(20)
+
+    monkeypatch.setattr(cif_viewer, "EllipsoidWorkerThread", NativeWorker)
+    rendered_threads = []
+    mw = _base_mw()
+    mw.plotter = _MockPlotter()
+    mw.plotter.clear = lambda: rendered_threads.append(QThread.currentThread())
+    n = 101
+    widget = QWidget()
+    qtbot.addWidget(widget)
+    for name, value in vars(
+        _make_widget(
+            structure=_MockStructure(np.zeros((n, 3, 3))),
+            last_rendered_atoms=[_MockAtom(f"C{i}", "C", i) for i in range(n)],
+        )
+    ).items():
+        setattr(widget, name, value)
+    mol = _make_mol(["C"] * n, [(float(i), 0.0, 0.0) for i in range(n)])
+    # Only host window registration is stubbed. Restore the native binding
+    # before running QProgressDialog and the real worker/event loop.
+    with monkeypatch.context() as registration:
+        draw_callback, mol = _setup(registration, mw, widget, mol=mol)
+
+    draw_callback(mw, mol)
+    assert widget.findChild(QProgressDialog) is not None
+    qtbot.waitUntil(lambda: mw._ellipsoid_thread is None, timeout=5000)
+    assert rendered_threads == [qapp.thread()]
 
 
 def test_draw_ellipsoid_model_threaded_path_terminates_previous_thread(monkeypatch):

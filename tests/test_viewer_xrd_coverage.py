@@ -210,7 +210,7 @@ C1 C 0.1 0.1 0.1
 
 def test_export_csv_write_exception_shows_critical(qtbot, monkeypatch, tmp_path):
     from cif_viewer.parser import parse_cif
-    from PyQt6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     cif_content = """data_xrd_writeerr
 _cell_length_a 5.0
@@ -271,7 +271,7 @@ C2 C 0.2 0.2 0.2
     critical_calls = []
     monkeypatch.setattr("cif_viewer.viewer_xrd.QMessageBox", MockQMessageBox)
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *a, **k: (str(tmp_path / "out.csv"), "CSV Files (*.csv)"),
     )
 

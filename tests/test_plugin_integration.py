@@ -159,10 +159,10 @@ class _FakeDockWidget:
 
 
 def _install_fake_qt(monkeypatch):
-    qtcore = types.ModuleType("PyQt6.QtCore")
-    qtwidgets = types.ModuleType("PyQt6.QtWidgets")
-    qtgui = types.ModuleType("PyQt6.QtGui")
-    pyqt6 = types.ModuleType("PyQt6")
+    qtcore = types.ModuleType("PySide6.QtCore")
+    qtwidgets = types.ModuleType("PySide6.QtWidgets")
+    qtgui = types.ModuleType("PySide6.QtGui")
+    pyside6 = types.ModuleType("PySide6")
 
     class DockWidgetArea:
         LeftDockWidgetArea = 1
@@ -205,10 +205,10 @@ def _install_fake_qt(monkeypatch):
 
     qtgui.QFont = FakeQFont
 
-    monkeypatch.setitem(sys.modules, "PyQt6", pyqt6)
-    monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qtcore)
-    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", qtwidgets)
-    monkeypatch.setitem(sys.modules, "PyQt6.QtGui", qtgui)
+    monkeypatch.setitem(sys.modules, "PySide6", pyside6)
+    monkeypatch.setitem(sys.modules, "PySide6.QtCore", qtcore)
+    monkeypatch.setitem(sys.modules, "PySide6.QtWidgets", qtwidgets)
+    monkeypatch.setitem(sys.modules, "PySide6.QtGui", qtgui)
 
 
 def test_draw_ellipsoid_model(monkeypatch):
@@ -1427,7 +1427,7 @@ C3 C 0.3 0.3 0.3 . .
     # Mock QFileDialog.getSaveFileName to return our target export path
     export_path = tmp_path / "exported_supercell.cif"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (
             str(export_path),
             "Crystallographic Information Files (*.cif)",
@@ -1437,7 +1437,7 @@ C3 C 0.3 0.3 0.3 . .
     # Mock QMessageBox.information
     info_calls = []
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QMessageBox.information",
+        "PySide6.QtWidgets.QMessageBox.information",
         lambda *args, **kwargs: info_calls.append(args),
     )
 
@@ -1644,7 +1644,7 @@ C1 C 0.1 0.1 0.1
 def test_powder_pattern_dialog_export_csv(qtbot, tmp_path, monkeypatch):
     from cif_viewer.viewer_xrd import PowderPatternDialog
     from cif_viewer.parser import parse_cif
-    from PyQt6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     cif_content = """data_xrd
 _cell_length_a 5.0
@@ -1728,7 +1728,7 @@ C2 C 0.2 0.2 0.2
     # 1. Export as Simulated Profile (Curve)
     export_path_profile = tmp_path / "profile_out.csv"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(export_path_profile), "CSV Files (*.csv)"),
     )
 
@@ -1752,7 +1752,7 @@ C2 C 0.2 0.2 0.2
     # 2. Export as Bragg Peaks (Sticks)
     export_path_sticks = tmp_path / "sticks_out.csv"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(export_path_sticks), "CSV Files (*.csv)"),
     )
 
@@ -1773,7 +1773,7 @@ C2 C 0.2 0.2 0.2
     # 3. Cancel Choice Dialog
     export_path_cancelled = tmp_path / "cancelled_out.csv"
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName",
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
         lambda *args, **kwargs: (str(export_path_cancelled), "CSV Files (*.csv)"),
     )
 
@@ -1784,7 +1784,7 @@ C2 C 0.2 0.2 0.2
 
     # 4. Cancel File Dialog (Choose Profile but cancel file dialog)
     monkeypatch.setattr(
-        "PyQt6.QtWidgets.QFileDialog.getSaveFileName", lambda *args, **kwargs: ("", "")
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName", lambda *args, **kwargs: ("", "")
     )
     MockQMessageBox.simulated_clicked_button_name = "Simulated Profile (Curve)"
     MockQMessageBox.simulated_cancel = False
@@ -2073,7 +2073,7 @@ def test_cif_viewer_widget_render_thread_asynchronous(qtbot, monkeypatch):
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     # Mock QProgressDialog show/close methods to prevent headless GUI hanging
-    from PyQt6.QtWidgets import QProgressDialog
+    from PySide6.QtWidgets import QProgressDialog
 
     monkeypatch.setattr(QProgressDialog, "show", lambda self_dialog: None)
     monkeypatch.setattr(QProgressDialog, "close", lambda self_dialog: None)
@@ -2180,7 +2180,7 @@ def test_cif_viewer_widget_render_thread_cancellation(qtbot, monkeypatch):
     if "PYTEST_CURRENT_TEST" in os.environ:
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
-    from PyQt6.QtWidgets import QProgressDialog
+    from PySide6.QtWidgets import QProgressDialog
 
     monkeypatch.setattr(QProgressDialog, "show", lambda self_dialog: None)
     monkeypatch.setattr(QProgressDialog, "close", lambda self_dialog: None)

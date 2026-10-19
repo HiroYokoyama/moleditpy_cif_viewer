@@ -9,10 +9,10 @@ import traceback
 from typing import Optional
 
 import numpy as np
-from PyQt6 import sip  # pylint: disable=c-extension-no-member
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import (
+from shiboken6 import isValid
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSignalBlocker, Slot
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -120,7 +120,7 @@ def _run_render_calculation(
 
 
 class RenderThread(QThread):
-    result_ready = pyqtSignal(list, list, object, str)
+    result_ready = Signal(list, list, object, str)
 
     def __init__(
         self,
@@ -184,6 +184,7 @@ class CifViewerWidget(QWidget):
         self.overlay_actor_names = []
         self._reset_camera_on_next_render = True
         self._render_thread = None
+        self._render_progress = None
         self._closed = False
 
         self.render_timer = QTimer(self)
@@ -1547,9 +1548,19 @@ class CifViewerWidget(QWidget):
         self.structure_table.blockSignals(False)
         self._enter_viewer_mode()
 
-        QTimer.singleShot(100, self.render)
+        QTimer.singleShot(100, self, self.render)
 
+    def _close_render_progress(self):
+        progress = self._render_progress
+        self._render_progress = None
+        if progress is not None:
+            with QSignalBlocker(progress):
+                progress.close()
+            progress.deleteLater()
+
+    @Slot()
     def _cancel_render(self):
+        self._close_render_progress()
         thread = self._render_thread
         if thread is not None:
             self._render_thread = None
@@ -1744,8 +1755,13 @@ class CifViewerWidget(QWidget):
                 self._on_render_data_ready([], [], None, str(exc), repeats)
             return
 
+        thread = self._render_thread
+        # A QObject slot provides a native receiver context: Qt queues the
+        # result to the GUI thread and drops delivery if the widget is deleted.
+        thread.result_ready.connect(
+            self._on_render_thread_result, Qt.ConnectionType.QueuedConnection
+        )
         if est_atoms > 250:
-            thread = self._render_thread
             progress_dialog = QProgressDialog(
                 "Rendering CIF structure, please wait...", "Cancel", 0, 0, self
             )
@@ -1755,36 +1771,20 @@ class CifViewerWidget(QWidget):
                 progress_dialog.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
             )
 
-            def on_cancel():
-                if self._render_thread is thread:
-                    self._cancel_render()
-
-            progress_dialog.canceled.connect(on_cancel)
-            thread.finished.connect(progress_dialog.close)
+            self._render_progress = progress_dialog
+            progress_dialog.canceled.connect(self._cancel_render)
             progress_dialog.show()
+        thread.start()
 
-            def on_ready(last_rendered_atoms, bonds, mol, err_msg):
-                progress_dialog.close()
-                if self._closed or self._render_thread is not thread:
-                    return
-                self._on_render_data_ready(
-                    last_rendered_atoms, bonds, mol, err_msg, repeats
-                )
-
-            thread.result_ready.connect(on_ready)
-            self._render_thread.start()
-        else:
-
-            def on_ready(last_rendered_atoms, bonds, mol, err_msg):
-                if self._closed or self._render_thread is not thread:
-                    return
-                self._on_render_data_ready(
-                    last_rendered_atoms, bonds, mol, err_msg, repeats
-                )
-
-            thread = self._render_thread
-            thread.result_ready.connect(on_ready)
-            self._render_thread.start()
+    @Slot(list, list, object, str)
+    def _on_render_thread_result(self, last_rendered_atoms, bonds, mol, err_msg):
+        thread = self.sender()
+        if self._closed or thread is None or thread is not self._render_thread:
+            return
+        self._close_render_progress()
+        self._on_render_data_ready(
+            last_rendered_atoms, bonds, mol, err_msg, thread.repeats
+        )
 
     def _on_render_data_ready(self, last_rendered_atoms, bonds, mol, err_msg, repeats):
         if err_msg:
@@ -1811,7 +1811,7 @@ class CifViewerWidget(QWidget):
             return
 
         def draw_overlays_and_render():
-            if sip.isdeleted(self) or self._closed:
+            if not isValid(self) or self._closed:
                 return
 
             try:
@@ -1839,7 +1839,9 @@ class CifViewerWidget(QWidget):
                 logging.error("Failed to reset camera or render cell: %s", exc)
 
         try:
-            QTimer.singleShot(100, draw_overlays_and_render)
+            # The native context cancels the callback when this widget is
+            # destroyed, before Qt can dispatch a dangling Python receiver.
+            QTimer.singleShot(100, self, draw_overlays_and_render)
         except Exception as exc:
             logging.warning(
                 "Failed to schedule draw_overlays_and_render with QTimer: %s",

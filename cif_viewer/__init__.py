@@ -6,19 +6,19 @@ import traceback
 import types
 
 import numpy as np
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QProgressDialog
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "1.5.0"
+PLUGIN_VERSION = "2.0.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
     "Visualization-only CIF crystal structure viewer with unit-cell and "
     "supercell rendering for MoleditPy."
 )
-PLUGIN_DEPENDENCIES = ["numpy", "pymatgen", "PyQt6", "pyvista", "rdkit"]
-PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=4.0.0, <5.0.0"
+PLUGIN_DEPENDENCIES = ["numpy", "pymatgen", "PySide6-Essentials", "pyvista", "rdkit"]
+PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=5.0.0, <6.0.0"
 
 WINDOW_ID = "cif_viewer_panel"
 
@@ -47,7 +47,7 @@ def atom_covariance(atom, structure):
 
 
 class EllipsoidWorkerThread(QThread):
-    result_ready = pyqtSignal(object, object, object, object, str)
+    result_ready = Signal(object, object, object, object, str)
 
     def __init__(
         self,
@@ -272,7 +272,7 @@ def initialize(context):
                             )
 
                     try:
-                        from PyQt6.QtCore import QTimer
+                        from PySide6.QtCore import QTimer
 
                         QTimer.singleShot(50, w.render_overlays_only)
                     except Exception as e:
@@ -289,8 +289,8 @@ def initialize(context):
         vm._cif_viewer_hooked = False
 
     def show_panel(file_path=None):
-        from PyQt6.QtCore import Qt
-        from PyQt6.QtWidgets import QDockWidget
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDockWidget
 
         from .viewer import CifViewerWidget
 
@@ -345,7 +345,7 @@ def initialize(context):
 
     def open_file(file_path):
         try:
-            from PyQt6.QtCore import QTimer
+            from PySide6.QtCore import QTimer
 
             QTimer.singleShot(0, lambda path=file_path: show_panel(path))
         except Exception as e:
@@ -662,7 +662,7 @@ def initialize(context):
                 render_axes()
             else:
                 try:
-                    from PyQt6.QtCore import QTimer
+                    from PySide6.QtCore import QTimer
 
                     QTimer.singleShot(50, render_axes)
                 except Exception:
@@ -830,7 +830,7 @@ def initialize(context):
 
         else:
             progress = None
-            if widget is not None:
+            if isinstance(widget, QWidget):
                 try:
                     progress = QProgressDialog(
                         "Drawing thermal ellipsoids, please wait...", None, 0, 0, widget
@@ -858,10 +858,7 @@ def initialize(context):
                 finalize_rendering(
                     merged_ellipsoids, fallback_glyphs, h_glyphs, rings_mesh
                 )
-                if hasattr(mw, "_ellipsoid_thread"):
-                    mw._ellipsoid_thread = None
-
-            mw._ellipsoid_thread = EllipsoidWorkerThread(
+            worker = EllipsoidWorkerThread(
                 atoms_data,
                 resolution,
                 scale_factor,
@@ -872,8 +869,19 @@ def initialize(context):
                 circle_color,
                 circle_width,
             )
-            mw._ellipsoid_thread.result_ready.connect(on_ready)
-            mw._ellipsoid_thread.start()
+
+            def on_finished():
+                # result_ready is emitted before run() returns. Retain the
+                # QThread until finished so its native thread is never deleted
+                # while still running, including on the error-result path.
+                if getattr(mw, "_ellipsoid_thread", None) is worker:
+                    mw._ellipsoid_thread = None
+                worker.deleteLater()
+
+            mw._ellipsoid_thread = worker
+            worker.result_ready.connect(on_ready)
+            worker.finished.connect(on_finished)
+            worker.start()
 
     context.add_menu_action("View/CIF Viewer Panel", open_from_menu)
 

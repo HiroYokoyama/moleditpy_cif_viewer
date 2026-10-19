@@ -2,7 +2,7 @@
 """
 test_all.py - Test runner script for CIF Viewer plugin.
 Automatically configures the environment and runs the test suite.
-If PyQt6 is not available or if the user passes --unit-only, it will skip Qt integration tests.
+If PySide6 is not available or if the user passes --unit-only, it will skip Qt integration tests.
 """
 
 import os
@@ -11,7 +11,7 @@ import sys
 
 def main():
     # 1. Configure Qt backend for pytest-qt
-    os.environ["PYTEST_QT_API"] = "pyqt6"
+    os.environ["PYTEST_QT_API"] = "pyside6"
 
     # 2. Set QPA platform to offscreen by default for headless operation if not already configured
     if "QT_QPA_PLATFORM" not in os.environ:
@@ -40,11 +40,11 @@ def main():
     if not any("--cov" in arg for arg in pytest_args):
         pytest_args.extend(["--cov=cif_viewer", "--cov-report=term-missing"])
 
-    # 5. Check if PyQt6 can be imported and initialized
+    # 5. Check if PySide6 can be imported and initialized
     has_qt = False
     if not unit_only:
         try:
-            from PyQt6.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
 
             # Attempt to retrieve or create the QApplication instance
             app = QApplication.instance()
@@ -52,7 +52,7 @@ def main():
                 app = QApplication([])
             has_qt = True
         except Exception as e:
-            print(f"Notice: PyQt6/Qt cannot be initialized ({e}).")
+            print(f"Notice: PySide6/Qt cannot be initialized ({e}).")
             print("Falling back to unit tests only.")
 
     # 6. Define target files/directories
@@ -65,7 +65,7 @@ def main():
         if unit_only:
             print("Running unit tests only (explicitly requested).")
         else:
-            print("PyQt6/Qt GUI environment not available or failed to initialize.")
+            print("PySide6/Qt GUI environment not available or failed to initialize.")
             print("Skipping GUI and integration tests (test_plugin_integration.py).")
         print("Running unit tests:")
         for f in unit_test_files:
