@@ -1,3 +1,5 @@
+
+from ._qt_callbacks import connect_queued
 import math
 import os
 import logging
@@ -10,7 +12,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "2.0.0"
+PLUGIN_VERSION = "2.0.1"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -879,8 +881,8 @@ def initialize(context):
                 worker.deleteLater()
 
             mw._ellipsoid_thread = worker
-            worker.result_ready.connect(on_ready)
-            worker.finished.connect(on_finished)
+            connect_queued(worker.result_ready, on_ready, widget, (object, object, object, object, str), cleanup=(worker.finished,))
+            connect_queued(worker.finished, on_finished, cleanup=(worker.finished,))
             worker.start()
 
     context.add_menu_action("View/CIF Viewer Panel", open_from_menu)
