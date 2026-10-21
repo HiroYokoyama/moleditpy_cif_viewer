@@ -859,6 +859,7 @@ class _FakeEllipsoidThread:
         self.terminated = False
         self.waited = False
         self.deleted = False
+        self.interrupted = False
         _FakeEllipsoidThread.instances.append(self)
 
     def start(self):
@@ -871,6 +872,9 @@ class _FakeEllipsoidThread:
 
     def terminate(self):
         self.terminated = True
+
+    def requestInterruption(self):
+        self.interrupted = True
 
     def wait(self):
         self.waited = True
@@ -986,7 +990,70 @@ def test_native_ellipsoid_thread_with_real_progress_parent(monkeypatch, qtbot, q
     assert rendered_threads == [qapp.thread()]
 
 
-def test_draw_ellipsoid_model_threaded_path_terminates_previous_thread(monkeypatch):
+def test_refresh_retires_native_worker_without_terminating_or_waiting(monkeypatch, qtbot):
+    import threading
+    import shiboken6
+    import cif_viewer
+    from PySide6.QtCore import QObject
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("MOLEDITPY_HEADLESS", raising=False)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    release = threading.Event()
+    started = threading.Event()
+    workers = []
+
+    class NativeWorker(EllipsoidWorkerThread):
+        def __init__(self, *args):
+            super().__init__(*args)
+            workers.append(self)
+
+        def run(self):
+            started.set()
+            release.wait(5)
+
+        def terminate(self):
+            raise AssertionError("native geometry must not be terminated")
+
+        def wait(self, *args):
+            raise AssertionError("refresh must not block on native geometry")
+
+    monkeypatch.setattr(cif_viewer, "EllipsoidWorkerThread", NativeWorker)
+    mw = _base_mw()
+    mw.plotter = _MockPlotter()
+    rendered = []
+    mw.plotter.clear = lambda: rendered.append(True)
+    n = 101
+    widget_data = _make_widget(
+        structure=_MockStructure(np.zeros((n, 3, 3))),
+        last_rendered_atoms=[_MockAtom(f"C{i}", "C", i) for i in range(n)],
+    )
+    widget = QObject()
+    for name, value in vars(widget_data).items():
+        setattr(widget, name, value)
+    mol = _make_mol(["C"] * n, [(float(i), 0.0, 0.0) for i in range(n)])
+    with monkeypatch.context() as registration:
+        draw_callback, mol = _setup(registration, mw, widget, mol=mol)
+
+    try:
+        draw_callback(mw, mol)
+        assert started.wait(2)
+        old = workers[0]
+        # Queue a result just before refresh; disconnect alone cannot retract it.
+        old.result_ready.emit(None, None, None, None, "")
+        draw_callback(mw, mol)
+        assert old.isRunning() and old.isInterruptionRequested()
+        assert shiboken6.isValid(old)
+        assert mw._ellipsoid_thread is workers[1]
+        qtbot.wait(20)
+        assert rendered == []
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: all(not shiboken6.isValid(w) for w in workers), timeout=5000)
+    assert mw._ellipsoid_thread is None
+
+
+def test_draw_ellipsoid_model_threaded_path_interrupts_previous_thread(monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("MOLEDITPY_HEADLESS", raising=False)
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
@@ -1014,8 +1081,9 @@ def test_draw_ellipsoid_model_threaded_path_terminates_previous_thread(monkeypat
 
     draw_callback(mw, mol)
 
-    assert old_thread.terminated is True
-    assert old_thread.waited is True
+    assert old_thread.interrupted is True
+    assert old_thread.terminated is False
+    assert old_thread.waited is False
 
 
 def test_draw_ellipsoid_model_threaded_path_disconnect_exception_swallowed(
@@ -1048,4 +1116,6 @@ def test_draw_ellipsoid_model_threaded_path_disconnect_exception_swallowed(
     mw._ellipsoid_thread = old_thread
 
     draw_callback(mw, mol)  # should not raise despite disconnect() failing
-    assert old_thread.terminated is True
+    assert old_thread.interrupted is True
+    assert old_thread.terminated is False
+    assert old_thread.waited is False
