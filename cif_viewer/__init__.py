@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import QApplication, QProgressDialog, QWidget
 
 PLUGIN_NAME = "CIF Viewer"
-PLUGIN_VERSION = "2.0.1"
+PLUGIN_VERSION = "2.0.2"
 PLUGIN_AUTHOR = "HiroYokoyama"
 
 PLUGIN_DESCRIPTION = (
@@ -76,6 +76,8 @@ class EllipsoidWorkerThread(QThread):
 
     def run(self):
         try:
+            if self.isInterruptionRequested():
+                return
             import pyvista as pv
 
             fallback_positions = []
@@ -105,6 +107,8 @@ class EllipsoidWorkerThread(QThread):
                     VDW_RADII = {}
 
             for index, atom_info in enumerate(self.atoms_data):
+                if self.isInterruptionRequested():
+                    return
                 color_rgb = (
                     self.col[index] if index < len(self.col) else [0.5, 0.5, 0.5]
                 )
@@ -166,6 +170,8 @@ class EllipsoidWorkerThread(QThread):
                         fallback_colors.append(color_rgb)
                         fallback_radii.append(rad)
 
+            if self.isInterruptionRequested():
+                return
             merged_ellipsoids = None
             if ellipsoid_meshes:
                 merged_ellipsoids = pv.merge(ellipsoid_meshes)
@@ -207,6 +213,8 @@ class EllipsoidWorkerThread(QThread):
                 current_pt_idx = 0
 
                 for index, radii, eigenvectors, pos in ellipsoid_circles_to_draw:
+                    if self.isInterruptionRequested():
+                        return
                     theta = np.linspace(0, 2 * np.pi, 37)
                     cos_t = np.cos(theta)
                     sin_t = np.sin(theta)
@@ -235,6 +243,8 @@ class EllipsoidWorkerThread(QThread):
                 lines_arr = np.concatenate(all_ring_lines, axis=0)
                 rings_mesh = pv.PolyData(points_arr, lines=lines_arr)
 
+            if self.isInterruptionRequested():
+                return
             self.result_ready.emit(
                 merged_ellipsoids, fallback_glyphs, h_glyphs, rings_mesh, ""
             )
@@ -419,15 +429,22 @@ def initialize(context):
         num_atoms = len(widget.last_rendered_atoms)
         use_threading = not is_headless and num_atoms > 100
 
-        # Terminate any existing ellipsoid thread
+        # Let native geometry operations unwind normally. The application's
+        # finished receiver retains each superseded worker until run() returns.
         if hasattr(mw, "_ellipsoid_thread") and mw._ellipsoid_thread is not None:
+            previous = mw._ellipsoid_thread
+            mw._ellipsoid_thread = None
             try:
-                mw._ellipsoid_thread.result_ready.disconnect()
+                previous.result_ready.disconnect()
             except Exception:
                 pass
-            mw._ellipsoid_thread.terminate()
-            mw._ellipsoid_thread.wait()
-            mw._ellipsoid_thread = None
+            previous.requestInterruption()
+            previous_progress = getattr(previous, "_progress", None)
+            if previous_progress is not None:
+                try:
+                    previous_progress.close()
+                except RuntimeError:
+                    pass
 
         should_restore_camera = True
         if widget is not None:
@@ -847,6 +864,9 @@ def initialize(context):
             def on_ready(
                 merged_ellipsoids, fallback_glyphs, h_glyphs, rings_mesh, err_msg
             ):
+                # Disconnect cannot retract a result already queued for the GUI.
+                if getattr(mw, "_ellipsoid_thread", None) is not worker:
+                    return
                 if progress is not None:
                     try:
                         progress.close()
@@ -871,6 +891,7 @@ def initialize(context):
                 circle_color,
                 circle_width,
             )
+            worker._progress = progress
 
             def on_finished():
                 # result_ready is emitted before run() returns. Retain the
