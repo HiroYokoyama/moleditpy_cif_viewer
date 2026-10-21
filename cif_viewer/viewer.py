@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ._qt_callbacks import connect_queued
+
 import dataclasses
 import json
 import os
@@ -1575,7 +1577,7 @@ class CifViewerWidget(QWidget):
                 def release():
                     _RETIRED_RENDER_THREADS.discard(thread)
                     thread.deleteLater()
-                thread.finished.connect(release)
+                connect_queued(thread.finished, release, cleanup=(thread.finished,))
                 if not thread.isRunning():
                     release()
             else:

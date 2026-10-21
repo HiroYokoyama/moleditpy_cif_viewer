@@ -159,6 +159,13 @@ class _FakeDockWidget:
 
 
 def _install_fake_qt(monkeypatch):
+    # Keep these synchronous unit doubles separate from native Qt regression tests.
+    import cif_viewer
+    def connect_double(signal, callback, owner=None, signature=(), cleanup=()):
+        signal.connect(callback)
+        return callback
+    monkeypatch.setattr(cif_viewer, "connect_queued", connect_double)
+
     qtcore = types.ModuleType("PySide6.QtCore")
     qtwidgets = types.ModuleType("PySide6.QtWidgets")
     qtgui = types.ModuleType("PySide6.QtGui")
