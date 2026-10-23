@@ -1,0 +1,19 @@
+{
+  "source": "cif_viewer/__init__.py",
+  "title": "CIF Viewer",
+  "package": "cif_viewer",
+  "archive": "cif_viewer_{version}.zip",
+  "assets": [
+    "cif_viewer_{version}.zip"
+  ],
+  "include": [
+    "README.md",
+    "LICENSE",
+    "COPYING",
+    "LICENSING.md"
+  ],
+  "exclude": [
+    "*/__pycache__/*",
+    "*/.git/*"
+  ]
+}
