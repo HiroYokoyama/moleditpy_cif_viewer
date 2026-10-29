@@ -1,3 +1,4 @@
+/* plugin-docs.css 2026-10-29 -- identical copy in every plugin page repo; bump the date when changing it. */
 /* Companion to python_molecular_editor's manual stylesheet. */
 .skip-link {
   position: fixed;
@@ -44,5 +45,6 @@
   .plugin-docs .page-content { padding: 2rem 1.25rem 3rem; }
   .plugin-docs .page-content h1 { font-size: 1.8rem; }
   .plugin-docs .page-content pre { padding: 1rem; }
+  .plugin-docs .page-content table { display: block; overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
