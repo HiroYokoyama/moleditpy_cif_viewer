@@ -31,7 +31,7 @@
   border-radius: 0;
   box-shadow: none;
 }
-.plugin-docs .page-content table { display: block; max-width: 100%; overflow-x: auto; }
+.plugin-docs .page-content table { width: 100%; table-layout: auto; }
 .plugin-docs .page-content pre { overflow-wrap: normal; }
 .plugin-docs .page-content h4 { margin-top: 1.75rem; margin-bottom: .75rem; }
 .plugin-docs .page-content hr { border: 0; border-top: 1px solid var(--border-color); margin: 2rem 0; }
